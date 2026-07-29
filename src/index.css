@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+  body { @apply bg-ink-950 text-slate-300 font-sans; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
+
+  /* Global dark styling for ALL native select + option elements.
+     This fixes the invisible-selected-text bug across every page regardless
+     of which className a <select> uses. Browsers default <option> to the OS
+     white background, making selected text white-on-white. */
+  select {
+    @apply bg-slate-900 text-white border border-slate-700 rounded-xl
+           outline-none focus:outline-none focus:ring-2 focus:ring-blue-500
+           focus:border-blue-500 transition-all duration-200 cursor-pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
+  select:disabled { @apply opacity-50 cursor-not-allowed; }
+
+  /* Option dropdown list items — dark bg, white text in all browsers.
+     The :checked / selected highlight uses blue-600. */
+  option {
+    @apply bg-slate-900 text-white;
+  }
+  option:checked,
+  option:checked:hover {
+    background-color: #2563eb; /* blue-600 */
+    color: #ffffff;
+  }
+  option:hover {
+    background-color: #1e293b; /* slate-800 */
+    color: #ffffff;
+  }
+}
+
+@layer components {
+  .input-base {
+    @apply w-full rounded-xl bg-white/5 border border-white/10 px-3.5 py-2.5 text-sm text-white
+           placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-accent-500
+           focus:border-accent-500 transition-colors;
+  }
+  /* Dedicated select styling — overrides input-base's translucent bg with a
+     solid dark surface so the selected value is always visible. */
+  select.input-base,
+  .select-base {
+    @apply bg-slate-900 text-white border border-slate-700 rounded-xl px-3.5 py-2.5
+           text-sm outline-none focus:outline-none focus:ring-2 focus:ring-blue-500
+           focus:border-blue-500 appearance-none transition-all duration-200 cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px;
+    padding-right: 2.25rem;
+  }
+  .input-label { @apply block text-xs font-medium text-slate-500 mb-1.5; }
+}

@@ -1,0 +1,96 @@
+export type ExamCategory =
+  | 'Engineering' | 'Medical' | 'Commerce' | 'Government'
+  | 'Defence' | 'Law' | 'MBA' | 'School' | 'International' | 'Other';
+
+export interface ExamEntry {
+  id: string;
+  name: string;
+  category: ExamCategory;
+  shortName?: string;
+}
+
+export const examCatalog: ExamEntry[] = [
+  // Engineering
+  { id: 'jee-main', name: 'JEE Main', category: 'Engineering', shortName: 'JEE Main' },
+  { id: 'jee-advanced', name: 'JEE Advanced', category: 'Engineering', shortName: 'JEE Adv' },
+  { id: 'bitsat', name: 'BITSAT', category: 'Engineering' },
+  { id: 'viteee', name: 'VITEEE', category: 'Engineering' },
+  { id: 'wbjee', name: 'WBJEE', category: 'Engineering' },
+  { id: 'mht-cet', name: 'MHT CET', category: 'Engineering' },
+  { id: 'comedk', name: 'COMEDK', category: 'Engineering' },
+  { id: 'kcet', name: 'KCET', category: 'Engineering' },
+  // Medical
+  { id: 'neet-ug', name: 'NEET UG', category: 'Medical' },
+  { id: 'aiims', name: 'AIIMS Preparation', category: 'Medical', shortName: 'AIIMS' },
+  { id: 'jipmer', name: 'JIPMER', category: 'Medical' },
+  // Commerce
+  { id: 'ca-foundation', name: 'CA Foundation', category: 'Commerce', shortName: 'CA Found' },
+  { id: 'ca-intermediate', name: 'CA Intermediate', category: 'Commerce', shortName: 'CA Inter' },
+  { id: 'ca-final', name: 'CA Final', category: 'Commerce', shortName: 'CA Final' },
+  { id: 'cs-executive', name: 'CS Executive', category: 'Commerce', shortName: 'CS Exec' },
+  { id: 'cs-professional', name: 'CS Professional', category: 'Commerce', shortName: 'CS Prof' },
+  { id: 'cma-foundation', name: 'CMA Foundation', category: 'Commerce', shortName: 'CMA Found' },
+  { id: 'cma-intermediate', name: 'CMA Intermediate', category: 'Commerce', shortName: 'CMA Inter' },
+  // Government
+  { id: 'upsc-cse', name: 'UPSC CSE', category: 'Government', shortName: 'UPSC' },
+  { id: 'ssc-cgl', name: 'SSC CGL', category: 'Government' },
+  { id: 'ssc-chsl', name: 'SSC CHSL', category: 'Government' },
+  { id: 'ssc-gd', name: 'SSC GD', category: 'Government' },
+  { id: 'ibps-po-clerk', name: 'Banking (IBPS PO/Clerk)', category: 'Government', shortName: 'IBPS' },
+  { id: 'sbi-po', name: 'SBI PO', category: 'Government' },
+  { id: 'rbi-grade-b', name: 'RBI Grade B', category: 'Government', shortName: 'RBI Gr B' },
+  { id: 'railway-exams', name: 'Railway Exams', category: 'Government', shortName: 'Railway' },
+  { id: 'state-psc', name: 'State PSC', category: 'Government' },
+  // Defence
+  { id: 'nda', name: 'NDA', category: 'Defence' },
+  { id: 'cds', name: 'CDS', category: 'Defence' },
+  { id: 'afcat', name: 'AFCAT', category: 'Defence' },
+  { id: 'agniveer', name: 'Agniveer', category: 'Defence' },
+  // Law
+  { id: 'clat', name: 'CLAT', category: 'Law' },
+  { id: 'ailet', name: 'AILET', category: 'Law' },
+  // MBA
+  { id: 'cat', name: 'CAT', category: 'MBA' },
+  { id: 'xat', name: 'XAT', category: 'MBA' },
+  { id: 'snap', name: 'SNAP', category: 'MBA' },
+  { id: 'nmat', name: 'NMAT', category: 'MBA' },
+  // School
+  { id: 'cbse-10', name: 'CBSE Class 10', category: 'School', shortName: 'CBSE 10' },
+  { id: 'cbse-12', name: 'CBSE Class 12', category: 'School', shortName: 'CBSE 12' },
+  { id: 'isc', name: 'ISC', category: 'School' },
+  { id: 'icse', name: 'ICSE', category: 'School' },
+  { id: 'state-boards', name: 'State Boards', category: 'School' },
+  // International
+  { id: 'sat', name: 'SAT', category: 'International' },
+  { id: 'act', name: 'ACT', category: 'International' },
+  { id: 'gre', name: 'GRE', category: 'International' },
+  { id: 'gmat', name: 'GMAT', category: 'International' },
+  { id: 'ielts', name: 'IELTS', category: 'International' },
+  { id: 'toefl', name: 'TOEFL', category: 'International' },
+  // Other
+  { id: 'gate', name: 'GATE', category: 'Other' },
+  { id: 'ugc-net', name: 'UGC NET', category: 'Other' },
+  { id: 'cuet-ug', name: 'CUET UG', category: 'Other' },
+  { id: 'cuet-pg', name: 'CUET PG', category: 'Other' },
+  { id: 'nift', name: 'NIFT', category: 'Other' },
+  { id: 'nid', name: 'NID', category: 'Other' },
+];
+
+export const examCategories: ExamCategory[] = [
+  'Engineering', 'Medical', 'Commerce', 'Government',
+  'Defence', 'Law', 'MBA', 'School', 'International', 'Other',
+];
+
+export function getExamsByCategory(category: ExamCategory): ExamEntry[] {
+  return examCatalog.filter((e) => e.category === category);
+}
+
+export function searchExams(query: string): ExamEntry[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return examCatalog;
+  return examCatalog.filter((e) => e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q));
+}
+
+export function getExamById(id: string): ExamEntry | undefined {
+  return examCatalog.find((e) => e.id === id);
+}
