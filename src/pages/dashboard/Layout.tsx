@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LayoutDashboard, Sparkles, ListChecks, RotateCcw, BookMarked, Sigma, Timer, BarChart3, Settings as SettingsIcon, LogOut, Menu, X, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
@@ -24,6 +24,38 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const lvl = levelFromXP(profile?.xp ?? 0);
 
+  const closeMobileMenu = () => setMobileOpen(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) {
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+      return undefined;
+    }
+
+    if (mobileOpen) {
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMobileMenu();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+    };
+  }, [mobileOpen]);
+
   async function doSignOut() {
     await signOut();
     navigate("/login");
@@ -37,7 +69,7 @@ export default function Layout() {
       </div>
       <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
         {NAV.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setMobileOpen(false)}
+          <NavLink key={n.to} to={n.to} end={n.end} onClick={closeMobileMenu}
             className={({ isActive }) => cn("flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors", isActive ? "bg-accent-600/15 text-accent-400" : "text-slate-400 hover:text-white hover:bg-white/5")}>
             <n.icon className="w-4 h-4" /> {n.label}
           </NavLink>
@@ -57,8 +89,8 @@ export default function Layout() {
       <AnimatePresence>
         {mobileOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 md:hidden">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
-            <motion.aside initial={{ x: -260 }} animate={{ x: 0 }} exit={{ x: -260 }} className="relative h-full w-60 bg-ink-900 border-r border-white/5 flex flex-col">{navContent}</motion.aside>
+            <div className="absolute inset-0 bg-black/60" onClick={closeMobileMenu} />
+            <motion.aside initial={{ x: -260 }} animate={{ x: 0 }} exit={{ x: -260 }} transition={{ type: "spring", stiffness: 320, damping: 30 }} className="relative h-full w-60 bg-ink-900 border-r border-white/5 flex flex-col">{navContent}</motion.aside>
           </motion.div>
         )}
       </AnimatePresence>
