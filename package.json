@@ -4,13 +4,11 @@
   "version": "6.3.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "node ./node_modules/typescript/bin/tsc -b && vite build",
-    "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
   },
   "engines": {
-    "node": "20"
+    "node": "24.x"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

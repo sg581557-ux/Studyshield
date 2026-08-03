@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Session, User } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import { supabase, OAUTH_REDIRECT_URL, RESET_PASSWORD_REDIRECT_URL, SIGNUP_REDIRECT_URL } from "../lib/supabase";
 import { db } from "../services/db";
 import { friendlyAuthError, stringifyError } from "../lib/authErrors";
@@ -38,7 +38,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(false);
   const profileLoads = useRef(0);
   const prevUserRef = useRef<User | null>(null);
-  const firstResolveDone = useRef(false);
 
   async function loadProfile(uid: string, email: string, fullName: string | null) {
     const n = ++profileLoads.current;
@@ -61,40 +60,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    let cancelled = false;
-    const safety = window.setTimeout(() => {
-      if (!cancelled && !firstResolveDone.current) {
-        firstResolveDone.current = true;
-        setLoading(false);
-      }
-    }, 6000);
+    // Subscribe to auth state changes FIRST — never gate app boot on
+    // getSession(). The client emits INITIAL_SESSION only after initialisation
+    // has fully completed (storage recovery + OAuth callback URL processing —
+    // detectSessionInUrl=true handles both the PKCE ?code= exchange and the
+    // implicit #access_token flow). INITIAL_SESSION (or SIGNED_IN, which can
+    // precede it on an OAuth callback) is therefore the authoritative "boot
+    // done" signal: loading stays true until it arrives, so the app can never
+    // observe a temporary null user while the callback URL is still being
+    // exchanged.
+    if (!supabase) {
+      console.error("[auth] Supabase client not initialized — auth unavailable");
+      setLoading(false);
+      return;
+    }
 
-    (async () => {
-      try {
-        const { data } = await supabase?.auth.getSession() ?? { data: null as never };
-        if (cancelled) return;
-        const session: Session | null = data?.session ?? null;
-        setUser(session?.user ?? null);
-        prevUserRef.current = session?.user ?? null;
-        if (session?.user) {
-          await loadProfile(session.user.id, session.user.email ?? "", session.user.user_metadata?.full_name ?? null);
-        }
-      } catch (err) {
-        console.error("[auth] initial session load threw", err);
-      } finally {
-        if (!cancelled) {
-          firstResolveDone.current = true;
-          setLoading(false);
-        }
-      }
-    })();
-
-    const { data: sub } = supabase?.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const hadSession = Boolean(prevUserRef.current);
       prevUserRef.current = session?.user ?? null;
+      setUser(session?.user ?? null);
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        setLoading(false);
+      }
       (async () => {
         try {
-          setUser(session?.user ?? null);
           if (session?.user) {
             await loadProfile(session.user.id, session.user.email ?? "", session.user.user_metadata?.full_name ?? null);
           } else {
@@ -107,13 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error("[auth] onAuthStateChange threw", err);
         }
       })();
-    }) ?? { subscription: null };
+    });
 
-    return () => {
-      cancelled = true;
-      window.clearTimeout(safety);
-      sub?.subscription?.unsubscribe();
-    };
+    return () => sub.subscription.unsubscribe();
   }, [toast]);
 
   async function signIn(email: string, password: string) {

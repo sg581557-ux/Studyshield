@@ -55,9 +55,15 @@ export default function App() {
         {/* ── Auth-only routes ─────────────────────────────────────────────
             ProtectedRoute (auth) → RequireNotOnboarded (onboarding status).
             Onboarding is only evaluated after authentication succeeds. */}
-        {/* Email-verification landing: Supabase exchanges the tokens here and
-            signs the user in; guards route to onboarding or the dashboard. */}
-        <Route path="/auth/callback" element={<ProtectedRoute><RequireNotOnboarded><AuthCallback /></RequireNotOnboarded></ProtectedRoute>} />
+        {/* /auth/callback is deliberately UNGUARDED — AuthCallback restores
+            the session itself (getSession / PKCE exchange) and routes to
+            /onboarding, /dashboard or /login. Route guards would race with
+            that restore and bounce users to /login before the OAuth tokens
+            are exchanged. */}
+        <Route
+  path="/auth/callback"
+  element={<AuthCallback />}
+/>
         <Route path="/onboarding" element={<ProtectedRoute><RequireNotOnboarded><Onboarding /></RequireNotOnboarded></ProtectedRoute>} />
 
         {/* ── Protected dashboard (auth → onboarding → layout) ───────────── */}
