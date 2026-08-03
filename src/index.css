@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
@@ -9,6 +19,16 @@
   }
   body { @apply bg-ink-950 text-slate-300 font-sans; }
   * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
+
+  /* ---- Light theme overrides ----
+     The app is dark by default. When <html class="light"> is present,
+     we override the core surfaces and text colors so the entire app
+     switches to a light theme without touching every component. */
+  html.light body { @apply bg-slate-100 text-slate-800; }
+  html.light * { scrollbar-color: rgba(0,0,0,0.15) transparent; }
+
+  /* Dark theme class (explicit) — mirrors the default body styling. */
+  html.dark body { @apply bg-ink-950 text-slate-300; }
 
   /* Global dark styling for ALL native select + option elements.
      This fixes the invisible-selected-text bug across every page regardless
@@ -60,4 +80,108 @@
     padding-right: 2.25rem;
   }
   .input-label { @apply block text-xs font-medium text-slate-500 mb-1.5; }
+}
+
+/* ============================================================
+   Light theme component overrides
+   The dashboard uses translucent white overlays (bg-white/5) and
+   ink-* backgrounds. In light mode we flip these to dark-on-light
+   equivalents so every card/input/badge adapts automatically.
+   ============================================================ */
+html.light .card,
+html.light [class*="bg-ink-900"],
+html.light [class*="bg-ink-950"] {
+  @apply bg-white text-slate-800 border-slate-200;
+}
+html.light .card { @apply shadow-sm; }
+
+html.light [class*="bg-white/5"],
+html.light [class*="bg-white/[0.02]"],
+html.light [class*="bg-white/[0.03]"],
+html.light [class*="bg-white/[0.04]"],
+html.light [class*="bg-white/[0.06]"] {
+  @apply bg-slate-50 border-slate-200;
+}
+
+html.light .input-base {
+  @apply bg-white text-slate-800 border-slate-300 placeholder:text-slate-400;
+}
+html.light select.input-base,
+html.light .select-base {
+  @apply bg-white text-slate-800 border-slate-300;
+}
+
+html.light .text-white { color: #0f172a; } /* slate-900 */
+html.light .text-slate-200 { color: #334155; } /* slate-700 */
+html.light .text-slate-300 { color: #334155; } /* slate-700 */
+html.light .text-slate-400 { color: #475569; } /* slate-600 */
+html.light .text-slate-500 { color: #64748b; } /* slate-500 */
+html.light .text-slate-600 { color: #94a3b8; } /* slate-400 */
+
+html.light select,
+html.light option {
+  @apply bg-white text-slate-800 border-slate-300;
+}
+html.light option:hover { @apply bg-slate-100 text-slate-800; }
+
+/* ============================================================
+   KaTeX rendering overrides
+   KaTeX injects inline styles using its own color palette. Without
+   these overrides the rendered math may look out of place in the
+   app's light/dark themes, and long block equations break layout.
+   ============================================================ */
+
+/* Wrap every KaTeX container so long block equations can scroll
+   horizontally instead of overflowing the card. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+  max-width: 100%;
+}
+
+/* Let KaTeX inherit its text color from the surrounding theme
+   instead of using KaTeX's static black. */
+.katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+/* Keeps sub/superscripts and fraction text readable in both themes. */
+.katex .strut,
+.katex .mord,
+.katex .mbin,
+.katex .mrel,
+.katex .mopen,
+.katex .mclose,
+.katex .mpunct,
+.katex .mop,
+.katex .mspace {
+  color: inherit;
+}
+
+/* KaTeX error/invalid-LaTeX output uses an inline error color.
+   In dark mode the default red is too bright, so we soften it. */
+.katex-error {
+  color: #ef4444 !important; /* red-500 — readable on both themes */
+}
+html.light .katex-error {
+  color: #dc2626 !important; /* red-600 — better contrast on light */
+}
+
+/* On small screens, inline equations that are too wide may overflow
+   the card. Keep them from breaking the layout. */
+.katex {
+  max-width: 100%;
+}
+
+/* Dark theme: ensure KaTeX fonts/colours keep full contrast. */
+html.dark .katex {
+  color: #e2e8f0; /* slate-200 */
+}
+
+/* Voice Mentor waveform bars */
+@keyframes eq {
+  0%, 100% { height: 25%; }
+  50% { height: 100%; }
 }

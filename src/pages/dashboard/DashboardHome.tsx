@@ -4,6 +4,7 @@ import { Sparkles, Flame, Clock, ArrowRight, CircleCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { db } from "../../services/db";
 import { Card, CardBody, ProgressBar, ProgressRing } from "../../components/ui";
+import MentorCheckinCard from "../../components/MentorCheckinCard";
 import { levelFromXP, minutesToHM, todayISODate } from "../../lib/constants";
 import type { PlanTask } from "../../lib/types";
 
@@ -15,13 +16,14 @@ function useGreeting(): string {
 }
 
 export default function DashboardHome() {
-  const { profile } = useAuth();
+  const { profile, user, loading: authLoading } = useAuth();
   const [today, setToday] = useState<PlanTask[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => { db.getTasksForDate(todayISODate()).then(setToday).catch(() => setToday([])).finally(() => setLoading(false)); }, []);
 
   const greeting = useGreeting();
-  const name = profile?.display_name || profile?.full_name || "there";
+  const emailName = user?.email ? user.email.split("@")[0].replace(/[._-]/g, " ") : "";
+  const name = authLoading ? "…" : (profile?.display_name || profile?.full_name || emailName || "there");
   const lvl = levelFromXP(profile?.xp ?? 0);
   const done = today.filter((t) => t.completed).length;
   const totalMin = today.reduce((a, t) => a + t.estimated_minutes, 0);
@@ -69,6 +71,9 @@ export default function DashboardHome() {
         </CardBody>
       </Card>
 
+      {/* Mentor daily check-in */}
+      <MentorCheckinCard />
+
       {/* Quick stats */}
       <div className="grid grid-cols-3 gap-3">
         <Card>
@@ -96,7 +101,7 @@ export default function DashboardHome() {
         <CardBody className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white">Today's plan</h3>
-            <Link to="/app/planner" className="text-xs text-accent-400 hover:underline flex items-center gap-1">
+            <Link to="/planner" className="text-xs text-accent-400 hover:underline flex items-center gap-1">
               Open planner <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
@@ -109,7 +114,7 @@ export default function DashboardHome() {
             <div className="text-center py-8">
               <CircleCheck className="w-8 h-8 text-slate-700 mx-auto mb-2" />
               <p className="text-sm text-slate-400">No tasks yet for today.</p>
-              <Link to="/app/planner" className="inline-flex items-center gap-1 mt-3 text-xs text-accent-400 hover:underline">
+              <Link to="/planner" className="inline-flex items-center gap-1 mt-3 text-xs text-accent-400 hover:underline">
                 Generate a plan <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
@@ -133,7 +138,7 @@ export default function DashboardHome() {
                 ))}
               </div>
               {today.length > 6 && (
-                <Link to="/app/planner" className="block text-center text-xs text-accent-400 hover:underline pt-1">
+                <Link to="/planner" className="block text-center text-xs text-accent-400 hover:underline pt-1">
                   +{today.length - 6} more tasks
                 </Link>
               )}

@@ -68,6 +68,11 @@ export async function updateStudyStats(): Promise<void> {
     const totalStudyMin = recent.reduce((a, t) => a + (t.actual_minutes ?? t.estimated_minutes), 0);
     const { weak, strong } = analyzeSubjects(recent);
 
+    // Count questions solved: DPPs, modules, PYQs, and practice tasks each
+    // represent answered/solved questions when completed.
+    const QUESTION_TYPES = new Set(["dpp", "module", "pyq", "practice"]);
+    const questionsSolvedThisBatch = recent.filter((t) => t.completed && QUESTION_TYPES.has(t.type)).length;
+
     const existing = await db.getStudyStats();
     const streakDays = Math.max(existing?.streak_days ?? 0, computeCurrentStreak(recent));
 
@@ -84,6 +89,7 @@ export async function updateStudyStats(): Promise<void> {
       total_study_min: (existing?.total_study_min ?? 0) + totalStudyMin,
       total_tasks_completed: (existing?.total_tasks_completed ?? 0) + completed,
       total_lectures_completed: (existing?.total_lectures_completed ?? 0) + recent.filter((t) => t.type === "lecture" && t.completed).length,
+      total_questions_solved: (existing?.total_questions_solved ?? 0) + questionsSolvedThisBatch,
       streak_days: streakDays,
       data_points: (existing?.data_points ?? 0) + recent.length,
     });

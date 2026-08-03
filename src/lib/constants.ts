@@ -1,10 +1,55 @@
-import type { ChapterStatus, EnergyLevel, StudyMode, Priority, ModuleProgress, BacklogKind } from "./types";
+import type { ChapterStatus, EnergyLevel, StudyMode, Priority, ModuleProgress, BacklogKind, Achievement } from "./types";
+
+export const STORAGE_KEY = "studyshield:app:data";
+export const APP_VERSION = 1;
+
+export const ACHIEVEMENTS: Achievement[] = [
+  {
+    id: "first_focus",
+    title: "First Focus",
+    description: "Complete your first focus session.",
+    icon: "🎯",
+    metric: "focus",
+    threshold: 1,
+    unlockedAt: null,
+  },
+  {
+    id: "task_master",
+    title: "Task Master",
+    description: "Complete 10 tasks.",
+    icon: "✅",
+    metric: "tasks",
+    threshold: 10,
+    unlockedAt: null,
+  },
+  {
+    id: "formula_keeper",
+    title: "Formula Keeper",
+    description: "Bookmark 5 formulas.",
+    icon: "🧠",
+    metric: "formulas",
+    threshold: 5,
+    unlockedAt: null,
+  },
+];
+
+export const SUBJECT_COLORS: Record<string, string> = {
+  Physics: "#38bdf8",
+  Chemistry: "#f59e0b",
+  Mathematics: "#8b5cf6",
+  Biology: "#10b981",
+  Accounts: "#ef4444",
+  Economics: "#14b8a6",
+  Business: "#6366f1",
+  General: "#64748b",
+};
 
 export const TASK_TYPE_LABELS: Record<string, string> = {
   coaching: "Coaching", lecture: "Lecture", backlog: "Backlog", revision: "Revision",
   dpp: "DPP", module: "Module", pyq: "PYQ", formula_revision: "Formula Revision",
   spaced_revision: "Spaced Revision", school: "School", study: "Study Session",
   mock_test_review: "Mock Test Review", practice: "Practice Questions",
+  break: "Rest Break", mistake_analysis: "Mistake Analysis", notes: "Revise Notes",
 };
 
 export const TASK_TYPE_DURATIONS_MIN: Record<string, number> = {
@@ -13,7 +58,7 @@ export const TASK_TYPE_DURATIONS_MIN: Record<string, number> = {
   mock_test_review: 30, practice: 45,
 };
 
-export const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+export const PRIORITY_ORDER: Record<Priority, number> = { critical: -1, high: 0, medium: 1, low: 2 };
 
 export const CHAPTER_STATUS_LABELS: Record<ChapterStatus, string> = {
   not_started: "Not Started", started: "Started", in_progress: "In Progress",

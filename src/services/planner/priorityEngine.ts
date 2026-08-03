@@ -110,15 +110,18 @@ export function computeTaskPriority(
   recovery: RecoveryItem[],
   examTomorrow: boolean,
 ): number {
+  // Base tiers follow the mentor priority ladder (P1 → P7):
+  // coaching/school/today's lecture > weak topics > modules > DPPs > PYQs > revision > backlog filler.
   let base = 5;
-  if (type === "coaching") base = 9;
-  else if (type === "lecture") base = 8;
-  else if (type === "pyq") base = examTomorrow ? 9 : 7;
+  if (type === "coaching" || type === "school") base = 10;
+  else if (type === "lecture") base = 9;
+  else if (type === "mistake_analysis" || type === "mock_review") base = 8.5;
+  else if (type === "pyq") base = examTomorrow ? 9.5 : 7.5;
+  else if (type === "module") base = 7.5;
   else if (type === "dpp") base = 7;
-  else if (type === "module") base = 6;
-  else if (type === "revision" || type === "spaced_revision") base = 6;
+  else if (type === "revision" || type === "spaced_revision") base = examTomorrow ? 8 : 7;
+  else if (type === "practice") base = 6;
   else if (type === "formula_revision") base = 4;
-  else if (type === "practice") base = 5;
   else if (type === "study") base = 4;
 
   let chapterBoost = 0;

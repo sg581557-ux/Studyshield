@@ -1,5 +1,7 @@
 import { Filter, RotateCcw } from 'lucide-react';
-import type { FormulaSubject } from '../../types';
+import type { FormulaSubject, FormulaDifficulty, FormulaImportance } from '../../types';
+import { getFormulaSubjects } from '../../data/formulas';
+import { examCatalog, examCategories, getExamsByCategory } from '../../data/exams';
 import { Select, Label } from '../ui/Input';
 import { Button } from '../ui/Button';
 
@@ -12,6 +14,12 @@ interface FormulaFiltersProps {
   onChapterChange: (c: string | 'All') => void;
   categories: string[];
   chapters: string[];
+  difficulty: FormulaDifficulty | 'All';
+  onDifficultyChange: (d: FormulaDifficulty | 'All') => void;
+  importance: FormulaImportance | 'All';
+  onImportanceChange: (i: FormulaImportance | 'All') => void;
+  exam: string | 'All';
+  onExamChange: (e: string | 'All') => void;
 }
 
 export function FormulaFilters({
@@ -23,13 +31,25 @@ export function FormulaFilters({
   onChapterChange,
   categories,
   chapters,
+  difficulty,
+  onDifficultyChange,
+  importance,
+  onImportanceChange,
+  exam,
+  onExamChange,
 }: FormulaFiltersProps) {
-  const hasActiveFilters = subject !== 'All' || category !== 'All' || chapter !== 'All';
+  const subjects = getFormulaSubjects();
+  const hasActiveFilters =
+    subject !== 'All' || category !== 'All' || chapter !== 'All' ||
+    difficulty !== 'All' || importance !== 'All' || exam !== 'All';
 
   const reset = () => {
     onSubjectChange('All');
     onCategoryChange('All');
     onChapterChange('All');
+    onDifficultyChange('All');
+    onImportanceChange('All');
+    onExamChange('All');
   };
 
   return (
@@ -39,7 +59,7 @@ export function FormulaFilters({
         <span className="font-medium">Filters</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
         <div>
           <Label>Subject</Label>
           <Select
@@ -47,9 +67,9 @@ export function FormulaFilters({
             onChange={(e) => onSubjectChange(e.target.value as FormulaSubject | 'All')}
           >
             <option value="All">All Subjects</option>
-            <option value="Physics">Physics</option>
-            <option value="Chemistry">Chemistry</option>
-            <option value="Mathematics">Mathematics</option>
+            {subjects.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
           </Select>
         </div>
 
@@ -79,6 +99,59 @@ export function FormulaFilters({
               <option key={c} value={c}>{c}</option>
             ))}
           </Select>
+        </div>
+
+        <div>
+          <Label>Difficulty</Label>
+          <Select
+            value={difficulty}
+            onChange={(e) => onDifficultyChange(e.target.value as FormulaDifficulty | 'All')}
+          >
+            <option value="All">All Difficulties</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </Select>
+        </div>
+
+        <div>
+          <Label>Importance</Label>
+          <Select
+            value={importance}
+            onChange={(e) => onImportanceChange(e.target.value as FormulaImportance | 'All')}
+          >
+            <option value="All">All Importance</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </Select>
+        </div>
+
+        <div>
+          <Label>Exam</Label>
+          <Select
+            value={exam}
+            onChange={(e) => onExamChange(e.target.value)}
+          >
+            <option value="All">All Exams</option>
+            {examCategories.map((cat) => {
+              const exams = getExamsByCategory(cat);
+              if (exams.length === 0) return null;
+              return (
+                <optgroup key={cat} label={cat}>
+                  {exams.map((e) => (
+                    <option key={e.id} value={e.id}>{e.shortName || e.name}</option>
+                  ))}
+                </optgroup>
+              );
+            })}
+          </Select>
+          {exam !== 'All' && (
+            <p className="text-[11px] text-gray-600 mt-1">
+              {examCatalog.find((e) => e.id === exam)?.name}
+            </p>
+          )}
         </div>
 
         <Button

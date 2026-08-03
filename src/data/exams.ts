@@ -15,10 +15,13 @@ export const examCatalog: ExamEntry[] = [
   { id: 'jee-advanced', name: 'JEE Advanced', category: 'Engineering', shortName: 'JEE Adv' },
   { id: 'bitsat', name: 'BITSAT', category: 'Engineering' },
   { id: 'viteee', name: 'VITEEE', category: 'Engineering' },
+  { id: 'srmeee', name: 'SRMJEEE', category: 'Engineering' },
   { id: 'wbjee', name: 'WBJEE', category: 'Engineering' },
   { id: 'mht-cet', name: 'MHT CET', category: 'Engineering' },
   { id: 'comedk', name: 'COMEDK', category: 'Engineering' },
   { id: 'kcet', name: 'KCET', category: 'Engineering' },
+  { id: 'ap-eamcet', name: 'AP EAMCET', category: 'Engineering' },
+  { id: 'ts-eamcet', name: 'TS EAMCET', category: 'Engineering' },
   // Medical
   { id: 'neet-ug', name: 'NEET UG', category: 'Medical' },
   { id: 'aiims', name: 'AIIMS Preparation', category: 'Medical', shortName: 'AIIMS' },
@@ -56,6 +59,7 @@ export const examCatalog: ExamEntry[] = [
   { id: 'nmat', name: 'NMAT', category: 'MBA' },
   // School
   { id: 'cbse-10', name: 'CBSE Class 10', category: 'School', shortName: 'CBSE 10' },
+  { id: 'cbse-11', name: 'CBSE Class 11', category: 'School', shortName: 'CBSE 11' },
   { id: 'cbse-12', name: 'CBSE Class 12', category: 'School', shortName: 'CBSE 12' },
   { id: 'isc', name: 'ISC', category: 'School' },
   { id: 'icse', name: 'ICSE', category: 'School' },
@@ -72,6 +76,7 @@ export const examCatalog: ExamEntry[] = [
   { id: 'ugc-net', name: 'UGC NET', category: 'Other' },
   { id: 'cuet-ug', name: 'CUET UG', category: 'Other' },
   { id: 'cuet-pg', name: 'CUET PG', category: 'Other' },
+  { id: 'olympiad', name: 'Olympiads', category: 'Other', shortName: 'Olympiad' },
   { id: 'nift', name: 'NIFT', category: 'Other' },
   { id: 'nid', name: 'NID', category: 'Other' },
 ];

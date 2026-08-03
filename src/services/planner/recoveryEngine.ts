@@ -1,4 +1,4 @@
-import type { PlanTask, RecoveryItemInput } from "../../lib/types";
+import type { PlanTask, RecoveryItem, RecoveryItemInput } from "../../lib/types";
 import { db } from "../db";
 
 export async function moveMissedTasksToRecovery(date: string): Promise<number> {
@@ -32,36 +32,80 @@ export async function moveMissedTasksToRecovery(date: string): Promise<number> {
 
 export interface RecoveryTaskWithId extends RecoveryItemInput {
   recovery_id: string;
+  times_rescheduled: number;
+}
+
+const MICRO_SPLIT_AFTER_SKIPS = 3;
+const MICRO_MAX_MIN = 20;
+
+function splitIntoMicroTasks(item: RecoveryItem): RecoveryTaskWithId[] {
+  // Missed 3+ times: never keep pushing the same block. Break it into
+  // smaller, easier wins and rebuild the student's confidence.
+  const minutes = Math.max(10, Math.min(MICRO_MAX_MIN, item.estimated_minutes));
+  const chunks = Math.max(1, Math.min(3, Math.round(item.estimated_minutes / minutes)));
+  const out: RecoveryTaskWithId[] = [];
+  for (let i = 0; i < chunks; i++) {
+    out.push({
+      recovery_id: item.id,
+      title: `Recovery: ${item.title} (part ${i + 1}/${chunks})`,
+      subject: item.subject,
+      chapter: item.chapter,
+      task_type: item.task_type,
+      estimated_minutes: minutes,
+      priority: item.priority,
+      difficulty: "easy",
+      reason: `${item.reason ?? "Missed task"} · skipped ${item.times_rescheduled}×, split into micro tasks`,
+      date_missed: item.date_missed,
+      original_task_id: item.original_task_id,
+      times_rescheduled: item.times_rescheduled,
+    });
+  }
+  return out;
 }
 
 export async function getRecoveryTasksForDay(maxMinutes: number): Promise<RecoveryTaskWithId[]> {
   const pending = await db.getRecoveryItems("pending");
   if (pending.length === 0) return [];
-  pending.sort((a, b) => {
-    const pa = a.priority === "high" ? 0 : a.priority === "medium" ? 1 : 2;
-    const pb = b.priority === "high" ? 0 : b.priority === "medium" ? 1 : 2;
-    if (pa !== pb) return pa - pb;
-    return a.times_rescheduled - b.times_rescheduled;
-  });
+
+  const rank = (p: RecoveryItem) => {
+    const pri = p.priority === "high" ? 0 : p.priority === "medium" ? 1 : 2;
+    return pri * 100 - Math.min(20, p.times_rescheduled);
+  };
+  pending.sort((a, b) => rank(a) - rank(b));
+
   const selected: RecoveryTaskWithId[] = [];
+  const scheduledIds = new Set<string>();
   let total = 0;
   for (const item of pending) {
-    if (total + item.estimated_minutes > maxMinutes) continue;
-    selected.push({
-      recovery_id: item.id,
-      title: `Recovery: ${item.title}`,
-      subject: item.subject,
-      chapter: item.chapter,
-      task_type: item.task_type,
-      estimated_minutes: item.estimated_minutes,
-      priority: item.priority,
-      difficulty: item.difficulty ?? undefined,
-      reason: item.reason,
-      date_missed: item.date_missed,
-      original_task_id: item.original_task_id,
-    });
-    total += item.estimated_minutes;
-    try { await db.markRecoveryScheduled(item.id, new Date().toISOString().slice(0, 10)); } catch {}
+    if (total >= maxMinutes) break;
+    const tasks = item.times_rescheduled >= MICRO_SPLIT_AFTER_SKIPS
+      ? splitIntoMicroTasks(item)
+      : [{
+          recovery_id: item.id,
+          title: `Recovery: ${item.title}`,
+          subject: item.subject,
+          chapter: item.chapter,
+          task_type: item.task_type,
+          estimated_minutes: item.estimated_minutes,
+          priority: item.priority,
+          difficulty: item.difficulty ?? undefined,
+          reason: item.reason ?? undefined,
+          date_missed: item.date_missed,
+          original_task_id: item.original_task_id,
+          times_rescheduled: item.times_rescheduled,
+        }];
+    for (const t of tasks) {
+      if (total + t.estimated_minutes > maxMinutes) continue;
+      selected.push(t);
+      total += t.estimated_minutes;
+      scheduledIds.add(item.id);
+    }
+  }
+  if (scheduledIds.size > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const id of scheduledIds) {
+      try { await db.markRecoveryScheduled(id, today); } catch {}
+    }
   }
   return selected;
 }

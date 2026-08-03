@@ -7,10 +7,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-Cz6t4tl3.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DpK5y6yf.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAnA" crossorigin="anonymous" />
+    <script type="module" crossorigin src="/assets/index-DoWy54oI.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BUoG-Hqh.css">
   </head>
   <body class="bg-ink-950">
+    <script>
+      // Apply theme before paint to avoid flash of incorrect theme.
+      (function () {
+        try {
+          var t = localStorage.getItem("studyshield-theme");
+          if (!t) t = "dark";
+          var resolved = t === "system"
+            ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : t;
+          var root = document.documentElement;
+          root.classList.add(resolved);
+          root.classList.remove(resolved === "dark" ? "light" : "dark");
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
     <div id="root"></div>
   </body>
 </html>

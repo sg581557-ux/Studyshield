@@ -11,6 +11,7 @@ import { Badge } from '../components/ui/Badge';
 import { useUserData } from '../context/UserDataContext';
 import { uid } from '../lib/utils';
 import type { FormulaSheetDoc } from '../types';
+import { SmartFormula } from '../components/FormulaVault/LaTeXRenderer';
 
 interface FormulaRow {
   id: string;
@@ -77,7 +78,9 @@ function FormulaSheetsContent() {
                     {sheet.formulas.slice(0, 3).map((f) => (
                       <div key={f.id} className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
                         <p className="text-xs font-medium text-gray-300">{f.name}</p>
-                        <p className="text-sm text-accent-light font-mono mt-0.5 truncate">{f.formula}</p>
+                        <div className="mt-0.5 overflow-x-auto">
+                          <SmartFormula value={f.formula} className="text-sm" displayMode={false} />
+                        </div>
                       </div>
                     ))}
                     {sheet.formulas.length > 3 && (

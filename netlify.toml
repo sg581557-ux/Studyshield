@@ -4,3 +4,12 @@
 
 [build.environment]
   NODE_VERSION = "20"
+
+# SPA fallback: deep links like /reset-password (used by Supabase password
+# reset emails) must serve index.html, not 404. Without this, clicking a
+# reset link lands on "Page Not Found" and the flow dies.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+

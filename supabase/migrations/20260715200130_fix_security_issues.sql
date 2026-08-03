@@ -414,12 +414,16 @@ DROP POLICY IF EXISTS "anon_insert_focus_sessions" ON focus_sessions;
 DROP POLICY IF EXISTS "anon_update_focus_sessions" ON focus_sessions;
 DROP POLICY IF EXISTS "anon_delete_focus_sessions" ON focus_sessions;
 
+DROP POLICY IF EXISTS "select_own_focus_sessions" ON focus_sessions;
 CREATE POLICY "select_own_focus_sessions" ON focus_sessions FOR SELECT
   TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "insert_own_focus_sessions" ON focus_sessions;
 CREATE POLICY "insert_own_focus_sessions" ON focus_sessions FOR INSERT
   TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "update_own_focus_sessions" ON focus_sessions;
 CREATE POLICY "update_own_focus_sessions" ON focus_sessions FOR UPDATE
   TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "delete_own_focus_sessions" ON focus_sessions;
 CREATE POLICY "delete_own_focus_sessions" ON focus_sessions FOR DELETE
   TO authenticated USING (auth.uid() = user_id);
 
@@ -429,12 +433,16 @@ DROP POLICY IF EXISTS "anon_insert_study_tasks" ON study_tasks;
 DROP POLICY IF EXISTS "anon_update_study_tasks" ON study_tasks;
 DROP POLICY IF EXISTS "anon_delete_study_tasks" ON study_tasks;
 
+DROP POLICY IF EXISTS "select_own_study_tasks" ON study_tasks;
 CREATE POLICY "select_own_study_tasks" ON study_tasks FOR SELECT
   TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "insert_own_study_tasks" ON study_tasks;
 CREATE POLICY "insert_own_study_tasks" ON study_tasks FOR INSERT
   TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "update_own_study_tasks" ON study_tasks;
 CREATE POLICY "update_own_study_tasks" ON study_tasks FOR UPDATE
   TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "delete_own_study_tasks" ON study_tasks;
 CREATE POLICY "delete_own_study_tasks" ON study_tasks FOR DELETE
   TO authenticated USING (auth.uid() = user_id);
 

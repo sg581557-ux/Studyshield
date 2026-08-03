@@ -14,7 +14,7 @@ export default function Analytics() {
 
   const totalMin = tasks.reduce((a, t) => a + t.estimated_minutes, 0);
   const completedMin = tasks.filter((t) => t.completed).reduce((a, t) => a + t.estimated_minutes, 0);
-  const focusMin = sessions.filter((s) => s.completed).reduce((a, s) => a + s.duration_minutes, 0);
+  const focusMin = sessions.filter((s) => s.completed).reduce((a, s) => a + (s.duration_minutes ?? s.minutes ?? 0), 0);
   const byType: Record<string, number> = {};
   for (const t of tasks) byType[t.type] = (byType[t.type] ?? 0) + t.estimated_minutes;
   const maxType = Math.max(1, ...Object.values(byType));

@@ -1,15 +1,63 @@
 import { supabase } from "../lib/supabase";
 import { todayISODate } from "../lib/constants";
+import { isNetworkError } from "../lib/authErrors";
+import { examIdForOnboarding, coachingLabel, ONBOARDING_STEP_COUNT } from "../lib/onboarding";
 import { seedFormulasForExam } from "../lib/formulaData";
 import type {
   BacklogItem, DailyPlanInputs, DailyPlanInputsInput, FocusSession, Formula,
-  FormulaBookmark, FormulaView, MockTestResult, OnboardingInput, PlanTask,
-  Priority, Profile, RevisionScheduleItem, SchoolChapterTracking,
+  FormulaBookmark, FormulaView, MockTestResult, OnboardingInput, OnboardingBacklog,
+  PlanTask, Priority, Profile, RevisionScheduleItem, SchoolChapterTracking,
   SyllabusChapter, SyllabusExam, SyllabusSubject, UserChapter, ChapterStatus,
-  BacklogDetailInput, BacklogKind, ModuleProgress,
+  BacklogDetailInput, BacklogKind, ModuleProgress, StudyMode,
   RecoveryItem, RecoveryItemInput, StudyStats, PlannerGoal, PlannerGoalInput,
-  TaskStatus,
+  TaskStatus, MentorDailyCheckin, MentorMemory, SmartBacklogInput,
+  BacklogResourceProgress,
 } from "../lib/types";
+import { remainingOf, resourceSummary, resourceMeta, extractBacklogResources, examIdMatchSet, backlogExamFamily } from "../lib/backlogMeta";
+
+function backlogTypesFor(b: OnboardingBacklog): BacklogKind[] {
+  const types: BacklogKind[] = [];
+  if (b.pending_lectures > 0) types.push("lecture");
+  if (b.pending_dpps > 0) types.push("dpp");
+  if (b.module_remaining > 0) types.push("module");
+  return types;
+}
+
+// 2. Auth verification: returns the authenticated user (auth.uid()) or null.
+async function currentSessionUser(): Promise<{ id: string; email?: string | null } | null> {
+  try {
+    const { data } = await supabase!.auth.getSession();
+    return data.session?.user ?? null;
+  } catch (err) {
+    console.error("[onboarding-save] getSession threw", err);
+    return null;
+  }
+}
+
+// 10. Retry-once helper for network failures. Any other error re-throws.
+async function withRetry<T>(fn: () => PromiseLike<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isNetworkError(err)) {
+      console.warn("[onboarding-save] network error — retrying once", err);
+      return await fn();
+    }
+    throw err;
+  }
+}
+
+// 1. Print the COMPLETE error: code, message, details, hint, payload, ids, table, op.
+function logSaveFailure(op: string, table: string, userId: string, sessionUserId: string | null, payload: unknown, error: unknown) {
+  const e = error as { code?: string; message?: string; details?: string; hint?: string };
+  console.error(`[onboarding-save] FAILED op=${op} table=${table} user=${userId} sessionUser=${sessionUserId ?? "NONE"}`);
+  console.error("  error.code:", e?.code ?? "(none)");
+  console.error("  error.message:", e?.message ?? "(none)");
+  console.error("  error.details:", e?.details ?? "(none)");
+  console.error("  error.hint:", e?.hint ?? "(none)");
+  console.error("  request payload:", JSON.stringify(payload));
+  console.error("  raw error:", error);
+}
 
 function assertClient() {
   if (!supabase) throw new Error("Supabase client not initialized");
@@ -43,6 +91,29 @@ export const db = {
     } catch (err) { console.error("[db.getProfile] threw", err); return null; }
   },
 
+  // Creates a minimal profile row ONLY when one doesn't exist yet. Existing
+  // rows are never touched, so returning users keep all their data. Used as a
+  // safety net when the handle_new_user DB trigger hasn't run (e.g. users who
+  // signed up before the trigger migration was applied).
+  async ensureProfile(userId: string, email: string, fullName: string | null): Promise<void> {
+    const c = assertClient();
+    try {
+      const { error } = await c.from("profiles").insert({
+        id: userId,
+        email,
+        full_name: fullName ?? "",
+        display_name: fullName ?? "",
+        onboarding_completed: false,
+        onboarding_step: 0,
+        updated_at: new Date().toISOString(),
+      });
+      if (error && !/duplicate key/i.test(error.message)) {
+        console.error("[db.ensureProfile]", error);
+        throw error;
+      }
+    } catch (err) { console.error("[db.ensureProfile] threw", err); throw err; }
+  },
+
   async upsertProfile(patch: Partial<Profile> & { id: string }): Promise<Profile | null> {
     const c = assertClient();
     try {
@@ -52,22 +123,170 @@ export const db = {
     } catch (err) { console.error("[db.upsertProfile] threw", err); throw err; }
   },
 
-  async completeOnboarding(userId: string, input: OnboardingInput): Promise<void> {
+  // Upserts (never silent-updates): if the profile row is missing — e.g. a user
+  // signed up before the profile trigger existed — the row is created here so
+  // onboarding can never silently fail to save. Every v2 answer has a column.
+  // Full diagnostics: session check, table probe, payload log, retry-once.
+  async completeOnboarding(userId: string, email: string, input: OnboardingInput): Promise<void> {
+    const c = assertClient();
+    const table = "profiles";
+    const payload: Record<string, unknown> = {
+      id: userId, email,
+      full_name: input.full_name, display_name: input.full_name,
+      age: input.age ? Number(input.age) : null,
+      school_class: input.school_class || null,
+      school_name: input.school_name || null,
+      target_exam: aliasExamId(examIdForOnboarding(input.target_exam)),
+      exam_year: input.exam_year || null,
+      current_level: input.current_level || null,
+      coaching: input.coaching || "none",
+      wake_up_time: input.wake_up_time || null,
+      sleep_time: input.sleep_time || null,
+      subjects: input.subjects,
+      primary_goal: input.primary_goal || null,
+      custom_goal: input.custom_goal || null,
+      preferred_language: input.preferred_language || null,
+      mentor_tone: input.mentor_tone || null,
+      daily_goal_hours: input.daily_goal_hours,
+      // Legacy columns kept in sync for the existing dashboard.
+      coaching_enabled: input.coaching === "other" || ["pw", "allen", "aakash", "fiitjee", "vibrant", "motion", "resonance", "unacademy"].includes(input.coaching),
+      coaching_name: coachingLabel(input.coaching, input.coaching_other),
+      attends_school: true, school_board: "Other", coaching_is_live: false,
+      coaching_days: [], coaching_start: input.coaching_start || "16:00", coaching_end: input.coaching_end || "19:00",
+      lecture_duration_min: 120, revision_time: "evening", study_mode: "balanced" as StudyMode,
+      // Habit calibration (AI Planner habit system).
+      weekday_study_hours: input.weekday_study_hours || null,
+      saturday_study_hours: input.saturday_study_hours > 0 ? input.saturday_study_hours : null,
+      sunday_study_hours: input.sunday_study_hours > 0 ? input.sunday_study_hours : null,
+      session_length_min: input.session_length_min || 45,
+      break_min: input.break_min || 10,
+      days_off: input.days_off ?? [],
+      productive_slots: input.productive_slots ?? [],
+      onboarding_data: input as unknown as Record<string, unknown>,
+      onboarding_completed: true, onboarding_step: ONBOARDING_STEP_COUNT,
+      updated_at: new Date().toISOString(),
+    };
+
+    // 2. Verify auth: supabase.auth.getUser() + getSession(), auth.uid() match.
+    const sessionUser = await currentSessionUser();
+    if (!sessionUser) throw new Error("Your session has expired. Please sign in again.");
+    if (sessionUser.id !== userId) {
+      console.error("[onboarding-save] user id mismatch", { payloadUserId: userId, sessionUserId: sessionUser.id });
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+
+    // 5. Required fields / type sanity before sending.
+    const issues: string[] = [];
+    if (!email) issues.push("email is empty");
+    if (!input.full_name?.trim()) issues.push("full_name is empty");
+    if (!Array.isArray(input.subjects)) issues.push("subjects is not an array");
+    if (typeof input.daily_goal_hours !== "number" || !Number.isFinite(input.daily_goal_hours)) issues.push(`daily_goal_hours is not a finite number (${input.daily_goal_hours})`);
+    if (issues.length > 0) console.warn("[onboarding-save] payload issues:", issues);
+
+    // 8. Print the full payload before sending.
+    console.log(`[onboarding-save] op=upsert table=${table} user=${userId} sessionUser=${sessionUser.id} payload=${JSON.stringify(payload)}`);
+
+    // 3. Verify the table exists (schema cache probe).
+    const probe = await c.from(table).select("id").limit(1);
+    if (probe.error && (probe.error.code === "PGRST205" || probe.error.code === "42P01")) {
+      console.error("[onboarding-save] TABLE MISSING", {
+        code: probe.error.code, message: probe.error.message,
+        details: probe.error.details, hint: probe.error.hint,
+      });
+      throw probe.error;
+    }
+
+    // 6 + 10. Upsert (onConflict id prevents duplicates); retry once on network failure.
+    try {
+      const { error } = await withRetry(() => c.from(table).upsert(payload, { onConflict: "id" }));
+      if (error) {
+        logSaveFailure("upsert", table, userId, sessionUser.id, payload, error);
+        throw error;
+      }
+    } catch (err) {
+      if (isNetworkError(err)) throw err; // already retried once
+      logSaveFailure("upsert", table, userId, sessionUser.id, payload, err);
+      throw err;
+    }
+  },
+
+  // Best-effort resume state: saves the current step + draft so an interrupted
+  // wizard resumes exactly where it left off. Never throws to the caller.
+  async saveOnboardingProgress(userId: string, step: number, form: OnboardingInput): Promise<void> {
     const c = assertClient();
     try {
       const { error } = await c.from("profiles").update({
-        full_name: input.full_name, display_name: input.full_name, target_exam: aliasExamId(input.target_exam),
-        exam_year: input.exam_year, school_board: input.school_board, school_class: input.school_class,
-        attends_school: input.attends_school, coaching_enabled: input.coaching_enabled,
-        coaching_name: input.coaching_name, coaching_is_live: input.coaching_is_live,
-        coaching_days: input.coaching_days, coaching_start: input.coaching_start,
-        coaching_end: input.coaching_end, lecture_duration_min: input.lecture_duration_min,
-        revision_time: input.revision_time, daily_goal_hours: input.daily_goal_hours,
-        study_mode: input.study_mode, onboarding_completed: true, onboarding_step: 4,
+        onboarding_step: step,
+        onboarding_data: form as unknown as Record<string, unknown>,
         updated_at: new Date().toISOString(),
       }).eq("id", userId);
-      if (error) { console.error("[db.completeOnboarding]", error); throw error; }
-    } catch (err) { console.error("[db.completeOnboarding] threw", err); throw err; }
+      if (error) console.warn("[db.saveOnboardingProgress]", error);
+    } catch (err) { console.warn("[db.saveOnboardingProgress] threw", err); }
+  },
+
+  // Creates backlog_items rows from the onboarding backlog answers. The exam
+  // id is stored on each row so the Backlog module can scope queries per exam.
+  async addOnboardingBacklogs(userId: string, items: OnboardingBacklog[], examId?: string | null): Promise<void> {
+    const c = assertClient();
+    const table = "backlog_items";
+    try {
+      if (items.length === 0) return;
+
+      // 2. Verify auth before writing.
+      const sessionUser = await currentSessionUser();
+      if (!sessionUser || sessionUser.id !== userId) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      const rows = items.map((b) => ({
+        title: buildBacklogTitle({
+          subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
+          pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
+          module_progress: "not_started" as ModuleProgress,
+          module_total_questions: b.module_remaining, module_solved_questions: 0,
+        }),
+        subject: b.subject, chapter: b.chapter,
+        exam_id: examId ?? null,
+        priority: "high" as Priority, status: "todo" as const,
+        backlog_types: backlogTypesFor(b),
+        pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
+        module_total_questions: b.module_remaining, module_solved_questions: 0,
+        overall_progress: computeOverallProgress({
+          subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
+          pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
+          module_progress: "not_started" as ModuleProgress,
+          module_total_questions: b.module_remaining, module_solved_questions: 0,
+        }, b.module_remaining),
+        pending_pyqs: b.pending_pyqs, revision_pending: b.revision_pending,
+        user_id: userId,
+      }));
+
+      // 8. Print the full payload before sending.
+      console.log(`[onboarding-save] op=insert table=${table} user=${userId} sessionUser=${sessionUser.id} rows=${rows.length} payload=${JSON.stringify(rows)}`);
+
+      // 3. Verify the table exists.
+      const probe = await c.from(table).select("id").limit(1);
+      if (probe.error && (probe.error.code === "PGRST205" || probe.error.code === "42P01")) {
+        console.error("[onboarding-save] TABLE MISSING", {
+          code: probe.error.code, message: probe.error.message,
+          details: probe.error.details, hint: probe.error.hint,
+        });
+        throw probe.error;
+      }
+
+      // 10. Insert with retry-once on network failure.
+      try {
+        const { error } = await withRetry(() => c.from(table).insert(rows));
+        if (error) {
+          logSaveFailure("insert", table, userId, sessionUser.id, rows, error);
+          throw error;
+        }
+      } catch (err) {
+        if (isNetworkError(err)) throw err;
+        logSaveFailure("insert", table, userId, sessionUser.id, rows, err);
+        throw err;
+      }
+    } catch (err) { console.error("[db.addOnboardingBacklogs] threw", err); throw err; }
   },
 
   async updateAcademicSettings(userId: string, patch: Partial<Profile>): Promise<void> {
@@ -281,10 +500,21 @@ export const db = {
     } catch (err) { console.error("[db.removeBookmark] threw", err); throw err; }
   },
 
-  async getBacklogItems(): Promise<BacklogItem[]> {
+  /**
+   * Fetches the user's backlog items. When an exam key is provided the rows
+   * are filtered at the database level (`exam_id.in(...)`) so no other exam's
+   * data is ever loaded. Rows with a null exam_id (legacy items created before
+   * exam tagging) are included — they cannot be attributed to another exam.
+   */
+  async getBacklogItems(examKey?: string | null): Promise<BacklogItem[]> {
     const c = assertClient();
     try {
-      const { data, error } = await c.from("backlog_items").select("*").order("created_at", { ascending: false });
+      let q = c.from("backlog_items").select("*");
+      if (examKey) {
+        const ids = examIdMatchSet(backlogExamFamily(examKey));
+        q = q.or(`exam_id.in.(${ids.join(",")}),exam_id.is.null`);
+      }
+      const { data, error } = await q.order("created_at", { ascending: false });
       if (error) console.error("[db.getBacklogItems]", error);
       return assertRows<BacklogItem>(data, "getBacklogItems");
     } catch (err) { console.error("[db.getBacklogItems] threw", err); return []; }
@@ -357,6 +587,72 @@ export const db = {
       const { error } = await c.from("backlog_items").delete().eq("id", id);
       if (error) { console.error("[db.deleteBacklogItem]", error); throw error; }
     } catch (err) { console.error("[db.deleteBacklogItem] threw", err); throw err; }
+  },
+
+  // --- Smart Backlog (selection-driven entry flow) ---
+  async addSmartBacklog(input: SmartBacklogInput): Promise<BacklogItem> {
+    const c = assertClient();
+    try {
+      const row = buildSmartBacklogRow(input);
+      const { data, error } = await c.from("backlog_items").insert(row).select("*").maybeSingle();
+      if (error) { console.error("[db.addSmartBacklog]", error); throw error; }
+      const item = (data as BacklogItem) ?? null;
+      if (!item) throw new Error("Failed to create backlog item");
+      return item;
+    } catch (err) { console.error("[db.addSmartBacklog] threw", err); throw err; }
+  },
+
+  async updateSmartBacklog(id: string, input: SmartBacklogInput): Promise<BacklogItem | null> {
+    const c = assertClient();
+    try {
+      const row = buildSmartBacklogRow(input);
+      const { data, error } = await c.from("backlog_items").update(row).eq("id", id).select("*").maybeSingle();
+      if (error) { console.error("[db.updateSmartBacklog]", error); throw error; }
+      return (data as BacklogItem) ?? null;
+    } catch (err) { console.error("[db.updateSmartBacklog] threw", err); throw err; }
+  },
+
+  /** One-tap progress: sets the completed count of one resource and re-syncs everything. */
+  async updateBacklogResourceProgress(id: string, kind: BacklogKind, completed: number): Promise<BacklogItem | null> {
+    const c = assertClient();
+    try {
+      const { data: existing, error: fe } = await c.from("backlog_items").select("*").eq("id", id).maybeSingle();
+      if (fe) { console.error("[db.updateBacklogResourceProgress] fetch", fe); throw fe; }
+      const item = existing as BacklogItem | null;
+      if (!item) return null;
+      const res = extractBacklogResources(item);
+      const cur = res[kind] ?? { total: 0, completed: 0 };
+      res[kind] = { total: cur.total, completed: Math.max(0, Math.min(cur.total, completed)) };
+      const patch = syncBacklogColumns(res);
+      patch.backlog_data = { ...(item.backlog_data ?? {}), resources: res as Record<string, unknown> };
+      const summary = resourceSummary(res);
+      patch.overall_progress = summary.pct;
+      patch.status = summary.total > 0 && summary.remaining === 0 ? "done" : "todo";
+      patch.completed_at = patch.status === "done" ? new Date().toISOString() : null;
+      const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
+      if (error) { console.error("[db.updateBacklogResourceProgress] update", error); throw error; }
+      return (data as BacklogItem) ?? null;
+    } catch (err) { console.error("[db.updateBacklogResourceProgress] threw", err); throw err; }
+  },
+
+  /** Swipe-right: mark the whole item complete (or reopen it). */
+  async completeBacklogItem(id: string, done: boolean): Promise<BacklogItem | null> {
+    const c = assertClient();
+    try {
+      const { data: existing, error: fe } = await c.from("backlog_items").select("*").eq("id", id).maybeSingle();
+      if (fe) { console.error("[db.completeBacklogItem] fetch", fe); throw fe; }
+      const item = existing as BacklogItem | null;
+      if (!item) return null;
+      const summary = resourceSummary(extractBacklogResources(item));
+      const patch: Partial<BacklogItem> = {
+        status: done ? "done" : "todo",
+        completed_at: done ? new Date().toISOString() : null,
+        overall_progress: done ? 100 : summary.pct,
+      };
+      const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
+      if (error) { console.error("[db.completeBacklogItem] update", error); throw error; }
+      return (data as BacklogItem) ?? null;
+    } catch (err) { console.error("[db.completeBacklogItem] threw", err); throw err; }
   },
 
   // --- Recovery Bucket ---
@@ -452,10 +748,133 @@ export const db = {
       return (data ?? []) as PlanTask[];
     } catch (e) { console.error("[db.getRecentCompletedTasks]", e); return []; }
   },
+
+  // --- Mock tests / PYQ attempts ---
+  async getMockTests(): Promise<MockTestResult[]> {
+    try {
+      const c = assertClient();
+      const { data, error } = await c.from("mock_test_results").select("*").order("test_date", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as MockTestResult[];
+    } catch (e) { console.error("[db.getMockTests]", e); return []; }
+  },
+  async addMockTest(input: {
+    test_name: string; subject?: string | null; total_marks: number;
+    obtained_marks: number; test_date: string; weak_chapters?: string[]; strong_chapters?: string[];
+  }): Promise<MockTestResult> {
+    const c = assertClient();
+    const { data, error } = await c.from("mock_test_results").insert({
+      test_name: input.test_name, subject: input.subject ?? null,
+      total_marks: input.total_marks, obtained_marks: input.obtained_marks,
+      test_date: input.test_date,
+      weak_chapters: input.weak_chapters ?? [], strong_chapters: input.strong_chapters ?? [],
+    }).select("*").single();
+    if (error) throw error;
+    return data as MockTestResult;
+  },
+  async deleteMockTest(id: string): Promise<void> {
+    const c = assertClient();
+    const { error } = await c.from("mock_test_results").delete().eq("id", id);
+    if (error) throw error;
+  },
+
+  // --- AI Mentor daily check-ins ---
+  async getDailyCheckin(date: string): Promise<MentorDailyCheckin | null> {
+    try {
+      const c = assertClient();
+      const { data, error } = await c.from("mentor_daily_checkins").select("*").eq("date", date).maybeSingle();
+      if (error) throw error;
+      return (data as MentorDailyCheckin | null) ?? null;
+    } catch (e) { console.error("[db.getDailyCheckin]", e); return null; }
+  },
+  async upsertDailyCheckin(input: {
+    date: string; message: string; completed_tasks: unknown[]; missed_tasks: unknown[]; focus_score: number | null;
+  }): Promise<MentorDailyCheckin | null> {
+    try {
+      const c = assertClient();
+      const { data, error } = await c.from("mentor_daily_checkins").upsert(input, { onConflict: "user_id,date" }).select("*").maybeSingle();
+      if (error) throw error;
+      return (data as MentorDailyCheckin | null) ?? null;
+    } catch (e) { console.error("[db.upsertDailyCheckin]", e); return null; }
+  },
+  async getRecentCheckins(limit = 7): Promise<MentorDailyCheckin[]> {
+    try {
+      const c = assertClient();
+      const { data, error } = await c.from("mentor_daily_checkins").select("*").order("date", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as MentorDailyCheckin[];
+    } catch (e) { console.error("[db.getRecentCheckins]", e); return []; }
+  },
+  async getMentorMemories(limit = 20): Promise<MentorMemory[]> {
+    try {
+      const c = assertClient();
+      const { data, error } = await c.from("mentor_memory").select("*").order("importance", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as MentorMemory[];
+    } catch (e) { console.error("[db.getMentorMemories]", e); return []; }
+  },
 };
 
 export function computeModuleRemaining(total: number, solved: number): number {
   return Math.max(0, (total ?? 0) - (solved ?? 0));
+}
+
+function moduleProgressFor(r?: BacklogResourceProgress): ModuleProgress {
+  if (!r || (r.total ?? 0) <= 0) return "not_started";
+  if ((r.completed ?? 0) >= r.total) return "completed";
+  if ((r.completed ?? 0) > 0) return "in_progress";
+  return "not_started";
+}
+
+/** Keeps the legacy scalar columns in sync with the structured resource map. */
+export function syncBacklogColumns(res: Partial<Record<BacklogKind, BacklogResourceProgress>>): Record<string, unknown> {
+  const kinds = (Object.keys(res) as BacklogKind[]).filter((k) => (res[k]?.total ?? 0) > 0);
+  return {
+    backlog_types: kinds,
+    pending_lectures: remainingOf(res.lecture),
+    pending_dpps: remainingOf(res.dpp),
+    module_total_questions: res.module?.total ?? 0,
+    module_solved_questions: res.module?.completed ?? 0,
+    module_progress: moduleProgressFor(res.module),
+    pending_pyqs: remainingOf(res.pyq),
+    revision_pending: remainingOf(res.revision),
+  };
+}
+
+export function buildSmartTitle(subject: string, chapter: string, resources: Partial<Record<BacklogKind, BacklogResourceProgress>>): string {
+  const bits: string[] = [];
+  for (const [kind, r] of Object.entries(resources)) {
+    if (!r || (r.total ?? 0) <= 0) continue;
+    const meta = resourceMeta(kind as BacklogKind);
+    const rem = remainingOf(r);
+    bits.push(rem > 0 ? `${meta.label} · ${rem} ${meta.unit}` : `${meta.label} · done`);
+  }
+  return `${subject} · ${chapter}${bits.length > 0 ? " — " + bits.join(", ") : ""}`;
+}
+
+/** Maps a structured SmartBacklogInput to a full backlog_items row. */
+export function buildSmartBacklogRow(input: SmartBacklogInput): Record<string, unknown> {
+  const res = { ...input.resources };
+  const summary = resourceSummary(res);
+  const row: Record<string, unknown> = {
+    title: buildSmartTitle(input.subject, input.chapter, res),
+    subject: input.subject,
+    chapter: input.chapter,
+    exam_id: input.exam,
+    priority: input.priority,
+    due_date: input.dueDate || null,
+    overall_progress: summary.pct,
+    backlog_data: {
+      exam: input.exam,
+      difficulty: input.difficulty ?? null,
+      estimated_minutes: input.estimatedMinutes ?? null,
+      resources: res as Record<string, unknown>,
+    },
+    ...syncBacklogColumns(res),
+  };
+  row.status = summary.total > 0 && summary.remaining === 0 ? "done" : "todo";
+  row.completed_at = row.status === "done" ? new Date().toISOString() : null;
+  return row;
 }
 
 export function buildBacklogTitle(input: BacklogDetailInput): string {

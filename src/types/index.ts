@@ -167,26 +167,69 @@ export interface ModuleTrackerData {
 }
 
 // ===== Formula Vault System =====
-export type FormulaSubject = 'Physics' | 'Chemistry' | 'Mathematics';
+export type FormulaSubject =
+  | 'Physics' | 'Chemistry' | 'Mathematics' | 'Biology'
+  | 'Quantitative Aptitude' | 'Accounts' | 'Economics' | 'Business Studies'
+  | 'Engineering Mathematics' | 'Geography';
 export type FormulaCategory =
-  | 'Class 11' | 'Class 12'
-  | 'Physical Chemistry' | 'Organic Chemistry' | 'Inorganic Chemistry';
+  | 'Class 10' | 'Class 11' | 'Class 12'
+  | 'Physical Chemistry' | 'Organic Chemistry' | 'Inorganic Chemistry'
+  | 'Mechanics' | 'Thermodynamics' | 'Electromagnetism'
+  | 'Algebra' | 'Number Theory' | 'Combinatorics' | 'Geometry'
+  | 'Genetics' | 'Plant Physiology' | 'Cell Biology' | 'Human Physiology' | 'Ecology'
+  | 'Arithmetic' | 'Data Interpretation' | 'CSAT'
+  | 'Accounting Basics' | 'Depreciation' | 'Ratios' | 'Partnership' | 'Final Accounts'
+  | 'Microeconomics' | 'Macroeconomics' | 'Indian Economy' | 'Financial Management'
+  | 'Linear Algebra' | 'Calculus' | 'Differential Equations' | 'Probability & Statistics'
+  | 'Numerical Methods' | 'Complex Analysis' | 'Fourier Analysis'
+  | 'Human Geography' | 'Physical Geography' | 'Environment' | 'Commercial Mathematics';
+export type FormulaDifficulty = 'easy' | 'medium' | 'hard';
+export type FormulaImportance = 'low' | 'medium' | 'high' | 'critical';
+export type ExamRelevance = 'JEE Main' | 'JEE Advanced' | 'Both' | 'NEET' | 'School';
+
+export interface FormulaVariable {
+  symbol: string;
+  description: string;
+  unit?: string;
+}
 
 export interface Formula {
   id: string;
   subject: FormulaSubject;
   category: FormulaCategory;
   chapter: string;
+  topic: string;
   name: string;
   formula: string;
-  variables: { symbol: string; description: string }[];
+  latex?: string;
+  description: string;
+  variables: FormulaVariable[];
+  units?: string;
+  conditions?: string;
   notes?: string;
   jeeTip?: string;
+  commonMistakes?: string[];
+  memoryTrick?: string;
+  tags: string[];
+  synonyms?: string[];
+  importance: FormulaImportance;
+  difficulty: FormulaDifficulty;
+  examRelevance: ExamRelevance;
+  /** All exams this formula is relevant for (canonical exam ids, e.g. 'jee-main'). */
+  exams?: string[];
+  /** Subject branch / category alias kept for backward compatibility. */
+  branch?: string;
+  relatedFormulas?: string[];
+  frequentlyUsed?: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FormulaVaultData {
   favorites: string[];
   recentlyViewed: string[];
+  revisionList: string[];
+  frequentlyUsed: string[];
 }
 
 // ===== Chrome Extension Integration =====

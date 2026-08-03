@@ -17,7 +17,7 @@ const EMPTY: AppData = {
   formulaViews: [],
   pyqAttempts: [],
   mockTests: [],
-  achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlockedAt: null })),
+  achievements: ACHIEVEMENTS.map((a: (typeof ACHIEVEMENTS)[number]) => ({ ...a, unlockedAt: null })),
   pomodoro: null,
 };
 
@@ -44,7 +44,7 @@ class Storage {
         mockTests: Array.isArray(parsed.mockTests) ? parsed.mockTests : [],
         achievements: Array.isArray(parsed.achievements) && parsed.achievements.length === ACHIEVEMENTS.length
           ? parsed.achievements
-          : ACHIEVEMENTS.map((a) => ({ ...a, unlockedAt: null })),
+          : ACHIEVEMENTS.map((a: (typeof ACHIEVEMENTS)[number]) => ({ ...a, unlockedAt: null })),
         pomodoro: parsed.pomodoro ?? null,
       };
       this.cache = data;
@@ -111,3 +111,40 @@ class Storage {
 }
 
 export const storage = new Storage();
+
+// ===== Formula Vault Storage =====
+// Lightweight localStorage helpers for the Formula Vault user data.
+// These are kept separate from the main Storage class because the Formula
+// Vault data model lives in src/types/index.ts (not src/lib/types.ts).
+const FORMULA_VAULT_KEY = 'studyshield-formula-vault';
+
+export interface FormulaVaultData {
+  favorites: string[];
+  recentlyViewed: string[];
+  revisionList: string[];
+  frequentlyUsed: string[];
+}
+
+export function loadFormulaVault(userId: string): FormulaVaultData {
+  const key = `${FORMULA_VAULT_KEY}-${userId}`;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return { favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] };
+    const parsed = JSON.parse(raw) as Partial<FormulaVaultData>;
+    return {
+      favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
+      recentlyViewed: Array.isArray(parsed.recentlyViewed) ? parsed.recentlyViewed : [],
+      revisionList: Array.isArray(parsed.revisionList) ? parsed.revisionList : [],
+      frequentlyUsed: Array.isArray(parsed.frequentlyUsed) ? parsed.frequentlyUsed : [],
+    };
+  } catch {
+    return { favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] };
+  }
+}
+
+export function saveFormulaVault(userId: string, data: FormulaVaultData): void {
+  const key = `${FORMULA_VAULT_KEY}-${userId}`;
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch { /* quota */ }
+}

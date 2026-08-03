@@ -219,7 +219,7 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
     catch (e) { console.error("[planner] chapter loading threw", e); warnings.push("Failed to load chapters."); }
   }
   try { userChapters = await db.getUserChapters(); } catch (e) { console.error("[planner] getUserChapters threw", e); warnings.push("Failed to load chapter progress."); }
-  try { backlog = await db.getBacklogItems(); } catch (e) { console.error("[planner] getBacklogItems threw", e); warnings.push("Failed to load backlog."); }
+  try { backlog = await db.getBacklogItems(profile.target_exam); } catch (e) { console.error("[planner] getBacklogItems threw", e); warnings.push("Failed to load backlog."); }
   try { formulas = await db.getFormulasForExam(examKey); } catch (e) { console.error("[planner] getFormulasForExam threw", e); }
 
   const subjectNames = subjects.length > 0 ? subjects.map((s) => s.name) : JEE_SUBJECTS_FALLBACK.slice();

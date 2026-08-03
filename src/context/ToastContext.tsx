@@ -18,9 +18,17 @@ export const useToast = () => {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Runtime guard: callers should always pass strings, but if an object or an
+  // unusable value slips through, never render it raw (React would show
+  // "{}" / "[object Object]" instead of a useful message).
+  function toSafeMessage(message: string): string {
+    const trimmed = typeof message === "string" ? message.trim() : "";
+    if (trimmed && trimmed !== "{}" && trimmed !== "[object Object]") return message;
+    return "Something went wrong. Please try again.";
+  }
   function push(type: ToastType, message: string) {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((p) => [...p, { id, type, message }]);
+    setToasts((p) => [...p, { id, type, message: toSafeMessage(message) }]);
     window.setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 5000);
   }
   const toast = {

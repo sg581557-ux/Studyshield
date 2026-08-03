@@ -1,45 +1,58 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutDashboard, Sparkles, ListChecks, RotateCcw, BookMarked, Sigma, Timer, BarChart3, Settings as SettingsIcon, LogOut, Menu, X, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Sparkles, ListChecks, RotateCcw, BookMarked, Sigma, Timer, BarChart3, Settings as SettingsIcon, LogOut, Menu, X, ShieldCheck, MessagesSquare, Mic, User, Plus } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import { levelFromXP } from "../../lib/constants";
+import ChapterProgressReminder from "../../components/ChapterProgressReminder";
 
 const NAV = [
-  { to: "/app", end: true, label: "Home", icon: LayoutDashboard },
-  { to: "/app/planner", label: "AI Planner", icon: Sparkles },
-  { to: "/app/backlog", label: "Backlog", icon: ListChecks },
-  { to: "/app/recovery", label: "Recovery", icon: RotateCcw },
-  { to: "/app/subjects", label: "Subjects", icon: BookMarked },
-  { to: "/app/formulas", label: "Formula Vault", icon: Sigma },
-  { to: "/app/timer", label: "Focus Timer", icon: Timer },
-  { to: "/app/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/app/settings", label: "Settings", icon: SettingsIcon },
+  { to: "/dashboard", end: true, label: "Home", icon: LayoutDashboard },
+  { to: "/planner", label: "AI Planner", icon: Sparkles },
+  { to: "/mentor", label: "AI Mentor", icon: MessagesSquare },
+  { to: "/voice", label: "Voice Mentor", icon: Mic },
+  { to: "/backlogs", label: "Backlog", icon: ListChecks },
+  { to: "/recovery", label: "Recovery", icon: RotateCcw },
+  { to: "/subjects", label: "Subjects", icon: BookMarked },
+  { to: "/vault", label: "Formula Vault", icon: Sigma },
+  { to: "/timer", label: "Focus Timer", icon: Timer },
+  { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/profile", label: "Profile", icon: User },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function Layout() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const lvl = levelFromXP(profile?.xp ?? 0);
 
   const closeMobileMenu = () => setMobileOpen(false);
+  const handleNavSelect = () => closeMobileMenu();
 
   useEffect(() => {
-    if (typeof window === "undefined" || window.innerWidth >= 768) {
-      document.body.style.overflow = "";
-      document.documentElement.style.overflow = "";
+    closeMobileMenu();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
       return undefined;
     }
 
-    if (mobileOpen) {
-      document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-      document.documentElement.style.overflow = "";
-    }
+    const syncScrollLock = () => {
+      const shouldLock = window.innerWidth < 768 && mobileOpen;
+      document.body.style.overflow = shouldLock ? "hidden" : "";
+      document.documentElement.style.overflow = shouldLock ? "hidden" : "";
+    };
+
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        closeMobileMenu();
+      }
+      syncScrollLock();
+    };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -47,10 +60,19 @@ export default function Layout() {
       }
     };
 
+    const handlePopState = () => {
+      closeMobileMenu();
+    };
+
+    syncScrollLock();
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("popstate", handlePopState);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("popstate", handlePopState);
       document.body.style.overflow = "";
       document.documentElement.style.overflow = "";
     };
@@ -67,9 +89,9 @@ export default function Layout() {
         <div className="w-9 h-9 rounded-xl bg-accent-600/20 flex items-center justify-center"><ShieldCheck className="w-5 h-5 text-accent-400" /></div>
         <div><p className="text-sm font-semibold text-white">StudyShield</p><p className="text-[10px] text-slate-500">{lvl.title}</p></div>
       </div>
-      <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto" onClickCapture={handleNavSelect}>
         {NAV.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} onClick={closeMobileMenu}
+          <NavLink key={n.to} to={n.to} end={n.end} onClick={handleNavSelect}
             className={({ isActive }) => cn("flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors", isActive ? "bg-accent-600/15 text-accent-400" : "text-slate-400 hover:text-white hover:bg-white/5")}>
             <n.icon className="w-4 h-4" /> {n.label}
           </NavLink>
@@ -104,6 +126,21 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Floating quick-add — opens the backlog sheet from anywhere */}
+      {location.pathname !== "/backlogs" && (
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          onClick={() => navigate("/backlogs?add=1")}
+          aria-label="Add backlog"
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-accent-600 text-white shadow-xl shadow-accent-600/40 flex items-center justify-center hover:bg-accent-500 transition-colors"
+        >
+          <Plus className="w-6 h-6" />
+        </motion.button>
+      )}
+
+      {/* Chapter progress reminder — weekly cadence + 80% chapter fast-track */}
+      <ChapterProgressReminder />
     </div>
   );
 }

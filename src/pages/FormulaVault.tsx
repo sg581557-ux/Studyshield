@@ -12,6 +12,7 @@ import {
   type FormulaEntry,
 } from '../lib/formulaData'
 import type { Formula } from '../lib/types'
+import { SmartFormula } from '../components/FormulaVault/LaTeXRenderer'
 
 // ─── Inline SVG Icon Components ──────────────────────────────────────────────
 const SearchIcon = ({ className = 'h-5 w-5' }: { className?: string }) => (
@@ -113,8 +114,8 @@ function FormulaCard({ entry, isFavorite, isPinned, onToggleFavorite, onTogglePi
         </div>
       </div>
       <button onClick={onOpen} className="text-left">
-        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2.5 font-mono text-sm text-primary-700 dark:text-primary-300 overflow-x-auto">
-          {entry.formula}
+        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2.5 overflow-x-auto">
+          <SmartFormula value={entry.formula} className="text-sm" displayMode={false} />
         </div>
       </button>
       <div className="flex flex-wrap gap-1.5">
@@ -171,8 +172,8 @@ function DetailModal({ entry, isFavorite, isPinned, onToggleFavorite, onTogglePi
           </div>
         </div>
 
-        <div className="rounded-xl bg-primary-50 dark:bg-primary-950/30 px-4 py-3 mb-5">
-          <p className="font-mono text-lg text-primary-700 dark:text-primary-300 break-words">{entry.formula}</p>
+        <div className="rounded-xl bg-primary-50 dark:bg-primary-950/30 px-4 py-3 mb-5 overflow-x-auto">
+          <SmartFormula value={entry.formula} className="text-lg" displayMode={true} />
         </div>
 
         <div className="space-y-4">

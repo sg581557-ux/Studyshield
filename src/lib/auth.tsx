@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import { supabase } from './supabase'
+import { supabase, RESET_PASSWORD_REDIRECT_URL } from './supabase'
 import type { Profile, UserRole } from './types'
 import type { User } from '@supabase/supabase-js'
 
@@ -111,7 +111,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => { await supabase.auth.signOut(); setUser(null); setProfile(null); setRole('user') }
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: RESET_PASSWORD_REDIRECT_URL,
+    })
     return { error: error?.message || null }
   }
 

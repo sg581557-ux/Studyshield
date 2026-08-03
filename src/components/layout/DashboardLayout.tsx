@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, Search, Bell } from "lucide-react";
 import { Sidebar } from "./Sidebar";
@@ -8,6 +8,49 @@ import { useAuth } from "../../context/AuthContext";
 export function DashboardLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { user } = useAuth();
+  const location = useLocation();
+
+  const closeDrawer = () => setDrawerOpen(false);
+
+  useEffect(() => {
+    closeDrawer();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const syncScrollLock = () => {
+      const shouldLock = window.innerWidth < 1024 && drawerOpen;
+      document.body.style.overflow = shouldLock ? "hidden" : "";
+      document.documentElement.style.overflow = shouldLock ? "hidden" : "";
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeDrawer();
+      }
+    };
+
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        closeDrawer();
+      }
+      syncScrollLock();
+    };
+
+    syncScrollLock();
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResize);
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+    };
+  }, [drawerOpen]);
 
   return (
     <div className="min-h-screen bg-ink-950 flex">
@@ -23,7 +66,7 @@ export function DashboardLayout() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/60 z-40 lg:hidden"
-              onClick={() => setDrawerOpen(false)}
+              onClick={closeDrawer}
             />
             <motion.aside
               initial={{ x: -280 }}
@@ -32,7 +75,7 @@ export function DashboardLayout() {
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
               className="fixed top-0 left-0 h-screen z-50 lg:hidden"
             >
-              <Sidebar onNavigate={() => setDrawerOpen(false)} />
+              <Sidebar onNavigate={closeDrawer} />
             </motion.aside>
           </>
         )}
