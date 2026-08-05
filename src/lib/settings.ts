@@ -101,8 +101,8 @@ export function validateProfileSettings(p: {
   break_min?: number;
 }): ValidationResult {
   const errors: string[] = [];
-  if (!p.full_name || !p.full_name.trim()) errors.push("Full name is required.");
-  if ((p.daily_goal_hours ?? 0) < 1 || (p.daily_goal_hours ?? 0) > 16) errors.push("Daily study hours must be between 1 and 16.");
+  if (p.full_name != null && !p.full_name.trim()) errors.push("Full name is required.");
+  if (p.daily_goal_hours != null && (p.daily_goal_hours < 1 || p.daily_goal_hours > 16)) errors.push("Daily study hours must be between 1 and 16.");
   if (p.min_daily_study_hours != null && (p.min_daily_study_hours < 0 || p.min_daily_study_hours > 16)) errors.push("Minimum study hours must be 0–16.");
   if (p.max_daily_study_hours != null && (p.max_daily_study_hours < 1 || p.max_daily_study_hours > 16)) errors.push("Maximum study hours must be 1–16.");
   if (p.min_daily_study_hours != null && p.max_daily_study_hours != null && p.min_daily_study_hours > p.max_daily_study_hours) {
