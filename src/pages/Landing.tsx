@@ -9,7 +9,6 @@ import {
   Target,
   RefreshCw,
   ChevronDown,
-  Play,
   ArrowRight,
   Sparkles,
   Flame,
@@ -37,28 +36,28 @@ const GradientText = ({ children, className = "" }: { children: React.ReactNode,
 // --- Sections ---
 
 const Hero = () => {
+  // Randomize particle positions once per mount — stable across re-renders
+  // (calling Math.random() in render re-randomizes on every update).
+  const [particles] = useState(() =>
+    [...Array(10)].map(() => ({
+      x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
+      y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 1000),
+      opacity: Math.random() * 0.5 + 0.2,
+      drift: Math.random() * -100 - 50,
+      duration: Math.random() * 5 + 5,
+    })),
+  );
   return (
     <section className="relative pt-40 pb-20 px-6 max-w-7xl mx-auto min-h-screen flex items-center">
       {/* Background Particles */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {[...Array(10)].map((_, i) => (
+        {particles.map((p, i) => (
           <motion.div
             key={i}
             className="absolute w-2 h-2 bg-blue-500 rounded-full blur-[2px]"
-            initial={{
-              x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
-              y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 1000),
-              opacity: Math.random() * 0.5 + 0.2
-            }}
-            animate={{
-              y: [null, Math.random() * -100 - 50],
-              opacity: [null, 0]
-            }}
-            transition={{
-              duration: Math.random() * 5 + 5,
-              repeat: Infinity,
-              ease: "linear"
-            }}
+            initial={{ x: p.x, y: p.y, opacity: p.opacity }}
+            animate={{ y: [null, p.drift], opacity: [null, 0] }}
+            transition={{ duration: p.duration, repeat: Infinity, ease: "linear" }}
           />
         ))}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-[128px]" />
@@ -79,13 +78,10 @@ const Hero = () => {
           <p className="text-lg text-gray-400 max-w-xl leading-relaxed">
             The AI-powered study operating system that plans your day, tracks your progress, manages backlog, and keeps you focused.
           </p>
-          <div className="flex flex-wrap items-center gap-4 pt-4">
+          <div className="flex justify-start pt-4">
             <Link to="/signup" className="px-8 py-4 rounded-full bg-white text-black font-semibold hover:bg-gray-200 transition-colors flex items-center gap-2">
               Start Free <ArrowRight className="w-4 h-4" />
             </Link>
-            <button className="px-8 py-4 rounded-full bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-colors flex items-center gap-2 backdrop-blur-md">
-              <Play className="w-4 h-4" /> Watch Demo
-            </button>
           </div>
         </motion.div>
 
@@ -356,9 +352,9 @@ const Testimonials = () => {
 
 const FAQ = () => {
   const faqs = [
-    { q: "Is StudyShield only for JEE and NEET?", a: "While currently optimized for JEE and NEET syllabi, the core study planner and focus tools can be used by any competitive exam student." },
-    { q: "How does the AI Planner work?", a: "It uses your selected syllabus, pending backlog, and daily available hours to generate a mathematically optimized schedule that ensures maximum coverage before D-day." },
-    { q: "Can I use it on mobile?", a: "Yes, StudyShield is fully responsive and functions as a progressive web app (PWA) on all mobile devices." }
+    { q: "Is StudyShield only for JEE and NEET?", a: "While StudyShield is currently optimized for JEE and NEET, the AI Planner and focus tools work well for any competitive exam student." },
+    { q: "How does the AI Planner work?", a: "The AI Planner uses your selected syllabus, pending backlog, and daily available hours to generate a mathematically optimized schedule that ensures maximum coverage before your exam day." },
+    { q: "Can I use it on mobile?", a: "Yes, StudyShield is fully responsive and works as a progressive web app (PWA) on all mobile devices, including a native-like experience on iOS and Android." }
   ];
 
   const [openIndex, setOpenIndex] = useState<number | null>(0);
@@ -419,7 +415,7 @@ const CTA = () => (
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+    <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
       <PublicNavbar />
       <main>
         <Hero />

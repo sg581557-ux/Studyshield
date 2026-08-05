@@ -26,7 +26,7 @@ class Storage {
 
   read(): AppData {
     if (this.cache) return this.cache;
-    let raw: string | null = null;
+    let raw: string | null;
     try { raw = localStorage.getItem(STORAGE_KEY); } catch { raw = null; }
     if (!raw) { this.cache = { ...EMPTY }; return this.cache; }
     try {

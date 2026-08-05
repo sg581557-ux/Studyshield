@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star, Lightbulb, Variable, BookOpen, ChevronDown, Copy, Download, Maximize2, X, CheckCircle, CircleHelp } from 'lucide-react';
 import type { Formula, FormulaSubject } from '../../types';
@@ -110,10 +110,30 @@ export function FormulaCard({
     setFullScreen(false);
   }, []);
 
-  const handleMarkRevised = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    onMarkRevised(formula.id);
-  }, [formula, onMarkRevised]);
+  const fullScreenCloseRef = useRef<HTMLButtonElement>(null);
+
+  // Dialog semantics + focus management + Escape for the full-screen view.
+  useEffect(() => {
+    if (!fullScreen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    fullScreenCloseRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullScreen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      previous?.focus?.();
+    };
+  }, [fullScreen]);
+
+  // Keyboard access for the card itself (Enter/Space opens the full view).
+  const onCardKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setFullScreen(true);
+    }
+  }, []);
 
   const handleAddToFrequentlyUsed = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -335,6 +355,10 @@ export function FormulaCard({
         hover
         className="p-5 flex flex-col gap-3 cursor-pointer relative group"
         onClick={() => onView(formula.id)}
+        onKeyDown={onCardKeyDown}
+        role="button"
+        tabIndex={0}
+        aria-label={`View ${formula.name}`}
         layout
       >
         {cardContent}
@@ -349,6 +373,9 @@ export function FormulaCard({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
             onClick={handleCloseFullScreen}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${formula.name} details`}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -362,7 +389,9 @@ export function FormulaCard({
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-white">{formula.name}</h2>
                   <button
+                    ref={fullScreenCloseRef}
                     onClick={handleCloseFullScreen}
+                    aria-label="Close formula details"
                     className="p-2 rounded-xl hover:bg-white/[0.06] text-gray-400 hover:text-white transition-colors"
                   >
                     <X size={20} />

@@ -4,3 +4,7 @@
 !.dev.vars.example
 .env*
 !.env.example
+
+# dependencies + build artifacts (dist is intentionally tracked for edge deploys)
+node_modules/
+*.tsbuildinfo

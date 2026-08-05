@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Sigma, Shuffle, Star, Grid, List, Target } from 'lucide-react';
+import { Search, Sigma, Shuffle, Star, Grid, List } from 'lucide-react';
 import type { Formula, FormulaSubject, FormulaDifficulty, FormulaImportance, FormulaCategory } from '../../types';
 import { allFormulas, getFormulaById } from '../../data/formulas';
 import { useFormulaVault } from '../../context/FormulaVaultContext';
@@ -9,7 +9,6 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { EmptyState } from '../ui/EmptyState';
-import { Badge } from '../ui/Badge';
 import { FormulaCard } from './FormulaCard';
 import { FormulaFilters } from './FormulaFilters';
 import { FavoritesSection } from './FavoritesSection';
@@ -19,8 +18,6 @@ export function FormulaVault() {
   const {
     favorites: favIds,
     recentlyViewed: recentIds,
-    revisionList: revisedIds,
-    frequentlyUsed: freqIds,
     toggleFavorite,
     isFavorite,
     addToRecentlyViewed,
@@ -36,17 +33,20 @@ export function FormulaVault() {
   const [chapterFilter, setChapterFilter] = useState<string | 'All'>('All');
   const [difficultyFilter, setDifficultyFilter] = useState<FormulaDifficulty | 'All'>('All');
   const [importanceFilter, setImportanceFilter] = useState<FormulaImportance | 'All'>('All');
-  const [examFilter, setExamFilter] = useState<string | 'All'>('All');
+  // The user's target exam (from onboarding / profile). The exam filter defaults
+  // to it and follows profile changes automatically; users can still switch to
+  // "All Exams" (or any other exam) at any time. Done as a render-phase
+  // adjustment ("adjusting state when a prop changes") so no effect cascade.
+  const { examId: userExamId, examName: userExamName } = useUserExam();
+  const [examFilter, setExamFilter] = useState<string | 'All'>(userExamId ?? 'All');
   const [showQuickRevision, setShowQuickRevision] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // The user's target exam (from onboarding / profile). The exam filter defaults
-  // to it and follows profile changes automatically; users can still switch to
-  // "All Exams" (or any other exam) at any time.
-  const { examId: userExamId, examName: userExamName } = useUserExam();
-  useEffect(() => {
+  const [prevExamId, setPrevExamId] = useState<string | 'All'>(userExamId ?? 'All');
+  if (prevExamId !== (userExamId ?? 'All')) {
+    setPrevExamId(userExamId ?? 'All');
     setExamFilter(userExamId ?? 'All');
-  }, [userExamId]);
+  }
 
   // Cascading filter options — scoped to the currently selected exam so filters
   // never offer categories/chapters that have no formulas for that exam.
@@ -87,16 +87,6 @@ export function FormulaVault() {
   const recentFormulas = useMemo(
     () => recentIds.map((id) => getFormulaById(id)).filter((f): f is Formula => f !== undefined),
     [recentIds],
-  );
-
-  const revisedFormulas = useMemo(
-    () => revisedIds.map((id) => getFormulaById(id)).filter((f): f is Formula => f !== undefined),
-    [revisedIds],
-  );
-
-  const frequentlyUsedFormulas = useMemo(
-    () => freqIds.map((id) => getFormulaById(id)).filter((f): f is Formula => f !== undefined),
-    [freqIds],
   );
 
   // Enhanced search: searches name, formula, chapter, topic, notes, jeeTip,

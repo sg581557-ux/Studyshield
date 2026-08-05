@@ -1,17 +1,16 @@
 import { supabase } from "../lib/supabase";
-import { todayISODate } from "../lib/constants";
 import { isNetworkError } from "../lib/authErrors";
 import { examIdForOnboarding, coachingLabel, ONBOARDING_STEP_COUNT } from "../lib/onboarding";
 import { seedFormulasForExam } from "../lib/formulaData";
 import type {
   BacklogItem, DailyPlanInputs, DailyPlanInputsInput, FocusSession, Formula,
-  FormulaBookmark, FormulaView, MockTestResult, OnboardingInput, OnboardingBacklog,
-  PlanTask, Priority, Profile, RevisionScheduleItem, SchoolChapterTracking,
-  SyllabusChapter, SyllabusExam, SyllabusSubject, UserChapter, ChapterStatus,
-  BacklogDetailInput, BacklogKind, ModuleProgress, StudyMode,
-  RecoveryItem, RecoveryItemInput, StudyStats, PlannerGoal, PlannerGoalInput,
-  TaskStatus, MentorDailyCheckin, MentorMemory, SmartBacklogInput,
-  BacklogResourceProgress,
+  FormulaBookmark, MockTestResult, OnboardingInput, OnboardingBacklog,
+  PlanTask, Priority, Profile, SyllabusChapter, SyllabusExam, SyllabusSubject,
+  UserChapter, ChapterStatus, BacklogDetailInput, BacklogKind, ModuleProgress,
+  StudyMode, RecoveryItem, RecoveryItemInput, StudyStats, PlannerGoal,
+  PlannerGoalInput, TaskStatus, MentorDailyCheckin, MentorMemory,
+  SmartBacklogInput, BacklogResourceProgress, ClassScheduleEntry,
+  ChapterProgressPatch,
 } from "../lib/types";
 import { remainingOf, resourceSummary, resourceMeta, extractBacklogResources, examIdMatchSet, backlogExamFamily } from "../lib/backlogMeta";
 
@@ -21,6 +20,13 @@ function backlogTypesFor(b: OnboardingBacklog): BacklogKind[] {
   if (b.pending_dpps > 0) types.push("dpp");
   if (b.module_remaining > 0) types.push("module");
   return types;
+}
+
+// Onboarding v3 stores module progress as a 0–100 percentage; the backlog
+// schema stores it as solved/total question counts. Clamp + convert.
+function clampModulePct(pct: number | undefined | null): number {
+  if (typeof pct !== "number" || !Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, Math.round(pct)));
 }
 
 // 2. Auth verification: returns the authenticated user (auth.uid()) or null.
@@ -48,6 +54,8 @@ async function withRetry<T>(fn: () => PromiseLike<T>): Promise<T> {
 }
 
 // 1. Print the COMPLETE error: code, message, details, hint, payload, ids, table, op.
+//    Also extracts the exact missing column from Postgres/PostgREST errors
+//    ("A field in the save doesn't exist in the profiles table" / 42703 / PGRST204).
 function logSaveFailure(op: string, table: string, userId: string, sessionUserId: string | null, payload: unknown, error: unknown) {
   const e = error as { code?: string; message?: string; details?: string; hint?: string };
   console.error(`[onboarding-save] FAILED op=${op} table=${table} user=${userId} sessionUser=${sessionUserId ?? "NONE"}`);
@@ -55,8 +63,40 @@ function logSaveFailure(op: string, table: string, userId: string, sessionUserId
   console.error("  error.message:", e?.message ?? "(none)");
   console.error("  error.details:", e?.details ?? "(none)");
   console.error("  error.hint:", e?.hint ?? "(none)");
+  console.error("  MISSING COLUMN:", missingColumnFromError(error) ?? "(none)");
   console.error("  request payload:", JSON.stringify(payload));
   console.error("  raw error:", error);
+}
+
+// Extracts the column name Postgres/PostgREST complained about from a save
+// error. Handles PostgREST ("Could not find the 'x' column of 'profiles' in
+// the schema cache") and Postgres (42703: column ... does not exist).
+export function missingColumnFromError(error: unknown): string | null {
+  const e = error as { code?: string; message?: string; details?: string };
+  const code = e?.code ?? "";
+  const message = e?.message ?? "";
+  const details = e?.details ?? "";
+  const isColumnError =
+    code === "42703" || code === "PGRST204" ||
+    /does not exist/i.test(details) ||
+    /Could not find the '.*' column/i.test(message) ||
+    /A field in the save doesn't exist/i.test(message);
+  if (!isColumnError) return null;
+  const fromDetails = details.match(/(?:column|relation)\s+"?([a-zA-Z0-9_.]+)"?\s+does not exist/i);
+  if (fromDetails) return fromDetails[1].split(".").pop() ?? null;
+  const fromMessage = message.match(/Could not find the '([^']+)' column/i);
+  if (fromMessage) return fromMessage[1];
+  return details || message || null;
+}
+
+// Logs a failed profile save from anywhere in the app with the full payload
+// and the exact missing column (if any). Used by pages that write profiles
+// directly (SettingsPage, SignupPage) so no save can ever fail silently.
+export function logProfileSaveFailure(source: string, table: string, payload: unknown, error: unknown) {
+  console.error(`[${source}] FAILED table=${table}`);
+  console.error("  MISSING COLUMN:", missingColumnFromError(error) ?? "(none)");
+  console.error("  request payload:", JSON.stringify(payload));
+  console.error("  complete error:", error);
 }
 
 function assertClient() {
@@ -92,25 +132,37 @@ export const db = {
   },
 
   // Creates a minimal profile row ONLY when one doesn't exist yet. Existing
-  // rows are never touched, so returning users keep all their data. Used as a
-  // safety net when the handle_new_user DB trigger hasn't run (e.g. users who
-  // signed up before the trigger migration was applied).
-  async ensureProfile(userId: string, email: string, fullName: string | null): Promise<void> {
+  // rows are never touched (INSERT ... ON CONFLICT DO NOTHING preserves
+  // existing data), so returning users keep all their data. Used as a safety
+  // net when the handle_new_user DB trigger hasn't run (e.g. users who signed
+  // up before the trigger migration was applied, or OAuth users whose trigger
+  // insert raced). Accepts optional avatar URL from OAuth providers (Google
+  // stores it as picture/avatar_url in user_metadata).
+  async ensureProfile(userId: string, email: string, fullName: string | null, avatarUrl?: string | null): Promise<Profile | null> {
     const c = assertClient();
     try {
-      const { error } = await c.from("profiles").insert({
+      const { data, error } = await c.from("profiles").insert({
         id: userId,
         email,
         full_name: fullName ?? "",
         display_name: fullName ?? "",
+        avatar_url: avatarUrl ?? null,
         onboarding_completed: false,
         onboarding_step: 0,
         updated_at: new Date().toISOString(),
-      });
-      if (error && !/duplicate key/i.test(error.message)) {
+      }).select("*").maybeSingle();
+      if (error) {
+        // 23505 = unique violation (duplicate key) — profile already exists.
+        // This is expected when the DB trigger already created the row; just
+        // re-fetch it instead of throwing.
+        if (error.code === "23505" || /duplicate key/i.test(error.message)) {
+          const { data: existing } = await c.from("profiles").select("*").eq("id", userId).maybeSingle();
+          return (existing as Profile) ?? null;
+        }
         console.error("[db.ensureProfile]", error);
         throw error;
       }
+      return (data as Profile) ?? null;
     } catch (err) { console.error("[db.ensureProfile] threw", err); throw err; }
   },
 
@@ -118,7 +170,7 @@ export const db = {
     const c = assertClient();
     try {
       const { data, error } = await c.from("profiles").upsert({ ...patch, updated_at: new Date().toISOString() }).select("*").maybeSingle();
-      if (error) { console.error("[db.upsertProfile]", error); throw error; }
+      if (error) { logProfileSaveFailure("db.upsertProfile", "profiles", patch, error); throw error; }
       return (data as Profile) ?? null;
     } catch (err) { console.error("[db.upsertProfile] threw", err); throw err; }
   },
@@ -127,9 +179,25 @@ export const db = {
   // signed up before the profile trigger existed — the row is created here so
   // onboarding can never silently fail to save. Every v2 answer has a column.
   // Full diagnostics: session check, table probe, payload log, retry-once.
-  async completeOnboarding(userId: string, email: string, input: OnboardingInput): Promise<void> {
+  // Returns the CONFIRMED row: after the upsert the row is re-selected and
+  // verified (onboarding_completed === true) so the wizard only proceeds when
+  // the database actually persisted everything. On transient failure the whole
+  // upsert is retried once before giving up.
+  async completeOnboarding(userId: string, email: string, input: OnboardingInput): Promise<Profile | null> {
     const c = assertClient();
     const table = "profiles";
+
+    // Live class blocks → legacy single-window columns + days list (kept in
+    // sync so the old dashboard/planner paths still work).
+    const schedule: ClassScheduleEntry[] = Array.isArray(input.class_schedule)
+      ? input.class_schedule
+          .filter((e) => e && e.day && typeof e.start === "string" && typeof e.end === "string")
+          .map((e) => ({ day: e.day.toLowerCase(), start: e.start, end: e.end }))
+      : [];
+    const WEEKDAY_SHORT: Record<string, string> = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
+    const firstBlock = schedule[0];
+    const coachingEnabled = input.coaching_type !== "self_study" && input.coaching !== "none" && input.coaching !== "";
+
     const payload: Record<string, unknown> = {
       id: userId, email,
       full_name: input.full_name, display_name: input.full_name,
@@ -140,6 +208,8 @@ export const db = {
       exam_year: input.exam_year || null,
       current_level: input.current_level || null,
       coaching: input.coaching || "none",
+      coaching_type: input.coaching_type || "online",
+      coaching_name: input.coaching_name || coachingLabel(input.coaching, input.coaching_other) || null,
       wake_up_time: input.wake_up_time || null,
       sleep_time: input.sleep_time || null,
       subjects: input.subjects,
@@ -148,12 +218,34 @@ export const db = {
       preferred_language: input.preferred_language || null,
       mentor_tone: input.mentor_tone || null,
       daily_goal_hours: input.daily_goal_hours,
+      // Coaching flow v2 (AI Planner reads these).
+      class_mode: coachingEnabled ? input.class_mode || null : null,
+      class_schedule: coachingEnabled && input.class_mode === "live" ? schedule : [],
+      lecture_duration: coachingEnabled && input.class_mode === "recorded" ? input.lecture_duration || 60 : null,
+      lectures_per_day: coachingEnabled && input.class_mode === "recorded" ? input.lectures_per_day || 2 : null,
+      preferred_study_time: input.preferred_study_time || "evening",
+      // Onboarding v3 (migration 20260805160000).
+      stream: input.stream || null,
+      academic_goals: Array.isArray(input.academic_goals) ? input.academic_goals : [],
+      board: input.board || null,
+      productive_time: input.productive_time || null,
+      desired_sleep_hours: input.desired_sleep_hours ? Number(input.desired_sleep_hours) : null,
+      tests_per_week: input.tests_per_week || 0,
+      school_days: Array.isArray(input.school_days) ? input.school_days : [],
+      school_start: input.school_start || null,
+      school_end: input.school_end || null,
+      study_days: Array.isArray(input.study_days) ? input.study_days : [],
+      coaching_mode: input.coaching_type || null,
       // Legacy columns kept in sync for the existing dashboard.
-      coaching_enabled: input.coaching === "other" || ["pw", "allen", "aakash", "fiitjee", "vibrant", "motion", "resonance", "unacademy"].includes(input.coaching),
-      coaching_name: coachingLabel(input.coaching, input.coaching_other),
-      attends_school: true, school_board: "Other", coaching_is_live: false,
-      coaching_days: [], coaching_start: input.coaching_start || "16:00", coaching_end: input.coaching_end || "19:00",
-      lecture_duration_min: 120, revision_time: "evening", study_mode: "balanced" as StudyMode,
+      coaching_enabled: coachingEnabled,
+      coaching_is_live: coachingEnabled && input.class_mode === "live",
+      coaching_days: schedule.map((e) => WEEKDAY_SHORT[e.day] ?? e.day),
+      coaching_start: firstBlock?.start || "16:00",
+      coaching_end: firstBlock?.end || "19:00",
+      lecture_duration_min: input.lecture_duration || 60,
+      revision_time: input.preferred_study_time && input.preferred_study_time !== "flexible" ? input.preferred_study_time : "evening",
+      study_mode: "balanced" as StudyMode,
+      attends_school: (input.school_days?.length ?? 0) > 0, school_board: input.board || "Other",
       // Habit calibration (AI Planner habit system).
       weekday_study_hours: input.weekday_study_hours || null,
       saturday_study_hours: input.saturday_study_hours > 0 ? input.saturday_study_hours : null,
@@ -196,18 +288,46 @@ export const db = {
       throw probe.error;
     }
 
-    // 6 + 10. Upsert (onConflict id prevents duplicates); retry once on network failure.
-    try {
-      const { error } = await withRetry(() => c.from(table).upsert(payload, { onConflict: "id" }));
-      if (error) {
-        logSaveFailure("upsert", table, userId, sessionUser.id, payload, error);
-        throw error;
+    // 6 + 10. Upsert (onConflict id prevents duplicates); retry once on network
+    // failure. After the write, RE-SELECT the row and verify it persisted —
+    // only then report success. One full retry of (upsert + verify) on
+    // transient failures before giving up.
+    const persist = async (): Promise<Profile | null> => {
+      try {
+        const { error } = await withRetry(() => c.from(table).upsert(payload, { onConflict: "id" }));
+        if (error) throw error;
+        const { data, error: verifyError } = await c.from(table).select("*").eq("id", userId).maybeSingle();
+        if (verifyError) throw verifyError;
+        const row = data as Profile | null;
+        if (!row || row.onboarding_completed !== true) {
+          console.warn("[onboarding-save] verify failed — row missing or not completed", { row: row && { id: row.id, onboarding_completed: row.onboarding_completed } });
+          return null;
+        }
+        return row;
+      } catch (err) {
+        logSaveFailure("upsert", table, userId, sessionUser.id, payload, err);
+        throw err;
       }
+    };
+
+    // Upsert + verify. One full retry of the pair on any transient failure
+    // (network error, row not yet visible), then fail loudly with diagnostics.
+    try {
+      const row = await persist();
+      if (row) return row;
     } catch (err) {
-      if (isNetworkError(err)) throw err; // already retried once
-      logSaveFailure("upsert", table, userId, sessionUser.id, payload, err);
-      throw err;
+      console.warn("[onboarding-save] first attempt failed; retrying once", err);
     }
+    try {
+      const row = await persist();
+      if (row) return row;
+    } catch (err2) {
+      logSaveFailure("upsert", table, userId, sessionUser.id, payload, err2);
+      throw err2;
+    }
+    const msg = "Your profile could not be saved to the database. Please try again.";
+    console.error("[onboarding-save] final verification failed after retries", { userId, table });
+    throw new Error(msg);
   },
 
   // Best-effort resume state: saves the current step + draft so an interrupted
@@ -243,21 +363,25 @@ export const db = {
           subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
           pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
           module_progress: "not_started" as ModuleProgress,
-          module_total_questions: b.module_remaining, module_solved_questions: 0,
+          module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
         }),
         subject: b.subject, chapter: b.chapter,
         exam_id: examId ?? null,
         priority: "high" as Priority, status: "todo" as const,
         backlog_types: backlogTypesFor(b),
         pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
-        module_total_questions: b.module_remaining, module_solved_questions: 0,
+        module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
         overall_progress: computeOverallProgress({
           subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
           pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
           module_progress: "not_started" as ModuleProgress,
-          module_total_questions: b.module_remaining, module_solved_questions: 0,
-        }, b.module_remaining),
+          module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
+        }, clampModulePct(b.module_pct)),
         pending_pyqs: b.pending_pyqs, revision_pending: b.revision_pending,
+        // Onboarding v3 per-chapter detail (migration 20260805160000).
+        lecture_status: b.lecture_status || "not_started",
+        revision_level: b.revision_level ?? 0,
+        confidence: b.confidence ?? 3,
         user_id: userId,
       }));
 
@@ -295,7 +419,7 @@ export const db = {
       const update: Record<string, unknown> = { ...patch, updated_at: new Date().toISOString() };
       if (patch.target_exam) update.target_exam = aliasExamId(patch.target_exam);
       const { error } = await c.from("profiles").update(update).eq("id", userId);
-      if (error) { console.error("[db.updateAcademicSettings]", error); throw error; }
+      if (error) { logProfileSaveFailure("db.updateAcademicSettings", "profiles", update, error); throw error; }
     } catch (err) { console.error("[db.updateAcademicSettings] threw", err); throw err; }
   },
 
@@ -323,7 +447,10 @@ export const db = {
       if (tasks.length === 0) return [];
       // Strip client-generated fields so the DB defaults (gen_random_uuid(), now(), auth.uid()) apply.
       // The plan_tasks.id column is uuid — client string ids like "id_..." cause a Postgres type error.
-      const clean = tasks.map(({ id, created_at, user_id, ...rest }) => rest);
+      const clean = tasks.map((t) => {
+        const { id: _id, created_at: _createdAt, user_id: _userId, ...rest } = t;
+        return rest;
+      });
       const { data, error } = await c.from("plan_tasks").insert(clean as never).select("*");
       if (error) { console.error("[db.insertTasks] Supabase error:", error); throw error; }
       return assertRows<PlanTask>(data, "insertTasks");
@@ -414,6 +541,163 @@ export const db = {
       if (error) { console.error("[db.upsertUserChapter]", error); throw error; }
       return (data as UserChapter) ?? null;
     } catch (err) { console.error("[db.upsertUserChapter] threw", err); throw err; }
+  },
+
+  // --- Academic Preferences: chapter/subject editor ----------------------
+  // Writes user_chapters (authoritative for planner/revision/focus) and
+  // mirrors the counters onto backlog_items when a matching row exists.
+  // When any backlog-style counter is set and no row exists, one is created
+  // so the Backlog module reflects the same numbers.
+  async saveChapterProgress(patch: ChapterProgressPatch): Promise<void> {
+    const c = assertClient();
+    try {
+      const { exam, subject, chapter } = patch;
+      const examKey = aliasExamId(exam || "");
+      const progress = {} as Record<string, unknown>;
+      if (patch.module_pct !== undefined) progress.module_pct = clampModulePct(patch.module_pct);
+      if (patch.dpp_pending !== undefined) progress.dpp_pending = Math.max(0, Math.round(patch.dpp_pending || 0));
+      if (patch.pyq_pending !== undefined) progress.pyq_pending = Math.max(0, Math.round(patch.pyq_pending || 0));
+      if (patch.revision_level !== undefined) progress.revision_level = Math.max(0, Math.min(3, Math.round(patch.revision_level || 0)));
+      if (patch.pending_tests !== undefined) progress.pending_tests = Math.max(0, Math.round(patch.pending_tests || 0));
+
+      const existing = await c.from("user_chapters")
+        .select("*").eq("subject", subject).eq("chapter", chapter).maybeSingle();
+      if (existing.error) { console.error("[db.saveChapterProgress] fetch", existing.error); throw existing.error; }
+      const uc = existing.data as UserChapter | null;
+
+      const ucPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (patch.status) ucPatch.status = patch.status;
+      if (patch.lectures_remaining !== undefined) ucPatch.lectures_remaining = Math.max(0, Math.round(patch.lectures_remaining || 0));
+      if (patch.questions_remaining !== undefined) ucPatch.questions_remaining = Math.max(0, Math.round(patch.questions_remaining || 0));
+      if (patch.revision_pending !== undefined) ucPatch.revision_pending = Math.max(0, Math.round(patch.revision_pending || 0));
+      if (patch.confidence !== undefined) ucPatch.confidence = Math.max(1, Math.min(5, Math.round(patch.confidence || 3)));
+      if (Object.keys(progress).length > 0) ucPatch.progress = { ...(uc?.progress ?? {}), ...progress };
+
+      if (uc) {
+        const { error } = await c.from("user_chapters").update(ucPatch).eq("id", uc.id);
+        if (error) { console.error("[db.saveChapterProgress] update", error); throw error; }
+      } else {
+        const { error } = await c.from("user_chapters").insert({
+          exam: examKey, subject, chapter,
+          status: patch.status ?? "not_started",
+          lectures_remaining: Math.max(0, Math.round(patch.lectures_remaining ?? 0)),
+          questions_remaining: Math.max(0, Math.round(patch.questions_remaining ?? 0)),
+          revision_pending: Math.max(0, Math.round(patch.revision_pending ?? 0)),
+          confidence: Math.max(1, Math.min(5, Math.round(patch.confidence ?? 3))),
+          progress: Object.keys(progress).length > 0 ? progress : undefined,
+        });
+        if (error) { console.error("[db.saveChapterProgress] insert", error); throw error; }
+      }
+
+      // Mirror onto backlog_items (all rows for this subject+chapter).
+      const blRes = await c.from("backlog_items").select("*").eq("subject", subject).eq("chapter", chapter);
+      if (blRes.error) { console.error("[db.saveChapterProgress] backlog fetch", blRes.error); throw blRes.error; }
+      const backlogRows = assertRows<BacklogItem>(blRes.data, "saveChapterProgress.backlog");
+
+      const blPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (patch.status) blPatch.lecture_status = patch.status;
+      if (patch.lectures_remaining !== undefined) blPatch.pending_lectures = Math.max(0, Math.round(patch.lectures_remaining || 0));
+      if (patch.dpp_pending !== undefined) blPatch.pending_dpps = Math.max(0, Math.round(patch.dpp_pending || 0));
+      if (patch.pyq_pending !== undefined) blPatch.pending_pyqs = Math.max(0, Math.round(patch.pyq_pending || 0));
+      if (patch.revision_pending !== undefined) blPatch.revision_pending = Math.max(0, Math.round(patch.revision_pending || 0));
+      if (patch.revision_level !== undefined) blPatch.revision_level = Math.max(0, Math.min(3, Math.round(patch.revision_level || 0)));
+      if (patch.confidence !== undefined) blPatch.confidence = Math.max(1, Math.min(5, Math.round(patch.confidence || 3)));
+      if (patch.pending_tests !== undefined) blPatch.pending_tests = Math.max(0, Math.round(patch.pending_tests || 0));
+      if (patch.priority) blPatch.priority = patch.priority;
+      if (patch.difficulty !== undefined) blPatch.difficulty = patch.difficulty;
+      if (patch.module_pct !== undefined) {
+        blPatch.module_total_questions = 100;
+        blPatch.module_solved_questions = clampModulePct(patch.module_pct);
+        blPatch.module_questions_remaining = Math.max(0, 100 - clampModulePct(patch.module_pct));
+        blPatch.module_progress = clampModulePct(patch.module_pct) >= 100 ? "completed" : clampModulePct(patch.module_pct) > 0 ? "in_progress" : "not_started";
+      }
+
+      const pendingLectures = Math.max(0, Math.round(patch.lectures_remaining ?? 0));
+      const pendingDpps = Math.max(0, Math.round(patch.dpp_pending ?? 0));
+      const pendingPyqs = Math.max(0, Math.round(patch.pyq_pending ?? 0));
+      const pendingRevision = Math.max(0, Math.round(patch.revision_pending ?? 0));
+      const pendingTests = Math.max(0, Math.round(patch.pending_tests ?? 0));
+      const hasContent =
+        pendingLectures > 0 || pendingDpps > 0 || pendingPyqs > 0 ||
+        pendingRevision > 0 || pendingTests > 0 || (patch.module_pct ?? 0) > 0 ||
+        (patch.status === "completed" && !uc);
+
+      if (backlogRows.length > 0) {
+        // Recompute overall progress from the merged counters.
+        const merged = backlogRows[0];
+        const blFull = { ...merged, ...blPatch };
+        const resources = extractBacklogResources(blFull as BacklogItem);
+        const overallPct = resourceSummary(resources).pct;
+        blPatch.overall_progress = overallPct;
+        blPatch.status = overallPct >= 100 ? "done" : "todo";
+        for (const row of backlogRows) {
+          const { error } = await c.from("backlog_items").update({ ...blPatch, exam_id: row.exam_id }).eq("id", row.id);
+          if (error) { console.error("[db.saveChapterProgress] backlog update", error); throw error; }
+        }
+      } else if (hasContent) {
+        const row = buildSmartBacklogRow({
+          exam: examKey,
+          subject,
+          chapter,
+          priority: patch.priority ?? "high",
+          difficulty: patch.difficulty ?? null,
+          resources: {
+            lecture: { total: pendingLectures, completed: 0 },
+            dpp: { total: pendingDpps, completed: 0 },
+            module: { total: 100, completed: (blPatch.module_solved_questions as number) ?? 0 },
+            pyq: { total: pendingPyqs, completed: 0 },
+            revision: { total: pendingRevision, completed: 0 },
+          },
+        });
+        const { error } = await c.from("backlog_items").insert(row);
+        if (error) { console.error("[db.saveChapterProgress] backlog insert", error); throw error; }
+      }
+    } catch (err) { console.error("[db.saveChapterProgress] threw", err); throw err; }
+  },
+
+  /** Removes a chapter everywhere: user_chapters + backlog_items + tracking. */
+  async deleteChapter(subject: string, chapter: string): Promise<void> {
+    const c = assertClient();
+    try {
+      const { error: e1 } = await c.from("user_chapters").delete().eq("subject", subject).eq("chapter", chapter);
+      if (e1) { console.error("[db.deleteChapter] user_chapters", e1); throw e1; }
+      const { error: e2 } = await c.from("backlog_items").delete().eq("subject", subject).eq("chapter", chapter);
+      if (e2) { console.error("[db.deleteChapter] backlog_items", e2); throw e2; }
+      const { error: e3 } = await c.from("school_chapter_tracking").delete().eq("subject", subject).eq("chapter", chapter);
+      if (e3) { console.error("[db.deleteChapter] school_chapter_tracking", e3); throw e3; }
+    } catch (err) { console.error("[db.deleteChapter] threw", err); throw err; }
+  },
+
+  /** Marks a chapter complete: status + zeroed counters everywhere. */
+  async markChapterCompleted(subject: string, chapter: string): Promise<void> {
+    const c = assertClient();
+    try {
+      const now = new Date().toISOString();
+      const { error: e1 } = await c.from("user_chapters")
+        .update({ status: "completed", lectures_remaining: 0, questions_remaining: 0, revision_pending: 0, progress: { fullyCompleted: true }, updated_at: now })
+        .eq("subject", subject).eq("chapter", chapter);
+      if (e1) { console.error("[db.markChapterCompleted] user_chapters", e1); throw e1; }
+      const { error: e2 } = await c.from("backlog_items")
+        .update({ status: "done", overall_progress: 100, completed_at: now, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now })
+        .eq("subject", subject).eq("chapter", chapter);
+      if (e2) { console.error("[db.markChapterCompleted] backlog_items", e2); throw e2; }
+    } catch (err) { console.error("[db.markChapterCompleted] threw", err); throw err; }
+  },
+
+  /** Resets a chapter's progress to not started (counters zeroed, rows kept). */
+  async resetChapterProgress(subject: string, chapter: string): Promise<void> {
+    const c = assertClient();
+    try {
+      const now = new Date().toISOString();
+      const { error: e1 } = await c.from("user_chapters")
+        .update({ status: "not_started", lectures_remaining: 0, questions_remaining: 0, revision_pending: 0, confidence: 3, progress: { notStarted: true }, updated_at: now })
+        .eq("subject", subject).eq("chapter", chapter);
+      if (e1) { console.error("[db.resetChapterProgress] user_chapters", e1); throw e1; }
+      const { error: e2 } = await c.from("backlog_items")
+        .update({ status: "todo", overall_progress: 0, completed_at: null, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now })
+        .eq("subject", subject).eq("chapter", chapter);
+      if (e2) { console.error("[db.resetChapterProgress] backlog_items", e2); throw e2; }
+    } catch (err) { console.error("[db.resetChapterProgress] threw", err); throw err; }
   },
 
   async getExams(): Promise<SyllabusExam[]> {
@@ -891,10 +1175,10 @@ export function buildBacklogTitle(input: BacklogDetailInput): string {
 }
 
 export function computeOverallProgress(input: BacklogDetailInput, moduleRemaining: number): number {
-  let totalUnits = 0, doneUnits = 0;
+  let totalUnits = 0;
   if (input.backlog_types.includes("lecture")) totalUnits += input.pending_lectures;
   if (input.backlog_types.includes("dpp")) totalUnits += input.pending_dpps;
-  if (input.backlog_types.includes("module")) { totalUnits += Math.max(moduleRemaining, input.module_total_questions); doneUnits += input.module_solved_questions; }
+  if (input.backlog_types.includes("module")) totalUnits += Math.max(moduleRemaining, input.module_total_questions);
   if (totalUnits <= 0) return 0;
   const pending = (input.pending_lectures ?? 0) + (input.pending_dpps ?? 0) + moduleRemaining;
   return Math.max(0, Math.min(100, Math.round(((totalUnits - pending) / totalUnits) * 100)));

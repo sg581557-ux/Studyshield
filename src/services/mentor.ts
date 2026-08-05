@@ -1,5 +1,5 @@
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
+import { supabase } from "../lib/supabase";
 import { todayISODate } from "../lib/constants";
 import { db, statsDb, recoveryDb, goalsDb } from "./db";
 import { revisionDue } from "./planner/revisionEngine";
@@ -50,6 +50,19 @@ export interface MentorContext {
   dailyGoalHours: number;
   attendsSchool: boolean;
   coachingEnabled: boolean;
+  // Onboarding v3 profile context (school schedule, goals, sleep, tests).
+  stream: string | null;
+  schoolClass: string | null;
+  board: string | null;
+  academicGoals: string[];
+  studyDays: string[];
+  schoolDays: string[];
+  schoolStart: string | null;
+  schoolEnd: string | null;
+  productiveTime: string | null;
+  productiveSlots: string[];
+  desiredSleepHours: number | null;
+  testsPerWeek: number | null;
   streak: number;
   xp: number;
   today: {
@@ -148,7 +161,7 @@ function daysUntilTargetYear(year: string | null): number | null {
   return Math.max(0, Math.ceil((target - Date.now()) / 86400000));
 }
 
-export async function buildMentorContext(userId: string, profile: Profile | null): Promise<MentorContext> {
+export async function buildMentorContext(_userId: string, profile: Profile | null): Promise<MentorContext> {
   const today = todayISODate();
   const weekAgo = daysAgoISODate(7);
 
@@ -266,6 +279,18 @@ export async function buildMentorContext(userId: string, profile: Profile | null
     dailyGoalHours: profile?.daily_goal_hours ?? 0,
     attendsSchool: profile?.attends_school ?? false,
     coachingEnabled: profile?.coaching_enabled ?? false,
+    stream: profile?.stream ?? null,
+    schoolClass: profile?.school_class ?? null,
+    board: profile?.board ?? null,
+    academicGoals: profile?.academic_goals ?? [],
+    studyDays: profile?.study_days ?? [],
+    schoolDays: profile?.school_days ?? [],
+    schoolStart: profile?.school_start ?? null,
+    schoolEnd: profile?.school_end ?? null,
+    productiveTime: profile?.productive_time ?? null,
+    productiveSlots: profile?.productive_slots ?? [],
+    desiredSleepHours: profile?.desired_sleep_hours ?? null,
+    testsPerWeek: profile?.tests_per_week ?? null,
     streak: stats?.streak_days ?? profile?.longest_streak ?? 0,
     xp: profile?.xp ?? 0,
     today: {
@@ -408,7 +433,7 @@ export async function classifyMentorError(raw: unknown): Promise<MentorError> {
       const j = await context?.json();
       message = (j?.message ?? j?.error ?? "") as string;
     } catch {
-      message = "";
+      // json() failed — keep the empty fallback
     }
     switch (status) {
       case 401:
@@ -500,191 +525,6 @@ export async function sendMentorMessage(
 }
 
 // ============================================================
-// Streaming — SSE from the mentor-chat edge function.
-//
-// Voice Mode uses this instead of sendMentorMessage so it can start
-// speaking the reply before the LLM finishes: deltas arrive as
-// `event: delta` blocks, the full reply as `event: done`.
-// ============================================================
-
-interface MentorStreamEvent {
-  event: string;
-  data: Record<string, unknown>;
-}
-
-/** Parse one SSE block ("event: x\ndata: {...}") into an event object. */
-function parseSseBlock(block: string): MentorStreamEvent | null {
-  let event = "message";
-  let data = "";
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data += line.slice(5).trim();
-  }
-  if (!data) return null;
-  try {
-    return { event, data: JSON.parse(data) as Record<string, unknown> };
-  } catch {
-    return null;
-  }
-}
-
-/** Map a non-200 streaming response to a descriptive MentorError. */
-async function classifyStreamError(res: Response): Promise<MentorError> {
-  let kind = "server_error";
-  let message = `The AI Mentor service failed (HTTP ${res.status}). Please retry.`;
-  try {
-    const j = (await res.json()) as { error?: string; message?: string };
-    kind = j?.error ?? kind;
-    if (j?.message) message = j.message;
-  } catch {
-    // body wasn't JSON — keep the generic message
-  }
-  switch (res.status) {
-    case 401:
-    case 403:
-      return new MentorError("auth", message, { status: res.status });
-    case 404:
-      return new MentorError("not_deployed", message, { status: res.status });
-    case 429:
-      return new MentorError("rate_limited", message, { retryable: true, status: res.status });
-    case 503:
-      return new MentorError("not_configured", message, { status: res.status });
-    default:
-      return res.status >= 500
-        ? new MentorError("server_error", message, { retryable: true, status: res.status })
-        : new MentorError("bad_request", message, { status: res.status });
-  }
-}
-
-export interface MentorStreamOptions {
-  threadId: string;
-  threadTitle: string;
-  userText: string;
-  history: MentorChatMessage[];
-  context: MentorContext;
-  /** Optional persisted language hint detected from audio. */
-  language?: string;
-  persistUser?: boolean;
-  /** Abort the stream mid-flight (barge-in) — errors are suppressed. */
-  signal?: AbortSignal;
-  onDelta: (delta: string) => void;
-  onDone: (reply: string, language?: string | null) => void;
-  onError: (err: MentorError) => void;
-}
-
-/**
- * Stream a mentor reply from the edge function. Returns immediately;
- * results arrive through the callbacks. The assistant message is
- * persisted automatically on completion.
- */
-export function streamMentorMessage(opts: MentorStreamOptions): void {
-  const trimmedText = opts.userText.trim();
-  const persistUser = opts.persistUser !== false;
-
-  void (async () => {
-    try {
-      if (!supabase) {
-        throw new MentorError("network", "App database connection is unavailable. Check your internet connection and retry.", { retryable: true });
-      }
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        throw new MentorError("auth", "You are not signed in. Please log in and try again.");
-      }
-
-      if (persistUser) {
-        await addMentorMessage(opts.threadId, "user", trimmedText);
-        if (opts.history.length === 0) {
-          await updateThreadTitleIfDefault(opts.threadId, opts.threadTitle, trimmedText);
-        }
-      }
-
-      const res = await fetch(`${supabaseUrl}/functions/v1/mentor-chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionData.session.access_token}`,
-          apikey: supabaseAnonKey,
-        },
-        body: JSON.stringify({
-          context: opts.context,
-          messages: [...opts.history, { role: "user", content: trimmedText }],
-          ...(opts.language ? { language: opts.language } : {}),
-          stream: true,
-        }),
-        signal: opts.signal,
-      });
-
-      if (!res.ok) {
-        opts.onError(await classifyStreamError(res));
-        return;
-      }
-      if (!res.body) {
-        opts.onError(new MentorError("network", "Streaming responses are not supported by this browser."));
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let reply = "";
-      let finished = false;
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop() ?? "";
-        for (const block of blocks) {
-          const evt = parseSseBlock(block);
-          if (!evt) continue;
-          if (evt.event === "delta") {
-            const delta = typeof evt.data.text === "string" ? evt.data.text : "";
-            if (delta) {
-              reply += delta;
-              opts.onDelta(delta);
-            }
-          } else if (evt.event === "done") {
-            finished = true;
-            const finalReply =
-              typeof evt.data.reply === "string" && evt.data.reply.trim() ? evt.data.reply : reply;
-            const lang = typeof evt.data.language === "string" ? evt.data.language : opts.language ?? null;
-            try {
-              await addMentorMessage(opts.threadId, "assistant", finalReply);
-            } catch (e) {
-              console.error("[mentor] failed to persist assistant message", e);
-            }
-            opts.onDone(finalReply, lang);
-          } else if (evt.event === "error") {
-            const rawKind = typeof evt.data.error === "string" ? evt.data.error : "server_error";
-            const kind: MentorErrorKind =
-              rawKind === "llm_auth" || rawKind === "llm_error" || rawKind === "llm_bad_request" || rawKind === "stream_failed"
-                ? "server_error"
-                : (rawKind as MentorErrorKind);
-            const message =
-              typeof evt.data.message === "string"
-                ? evt.data.message
-                : "The AI Mentor service returned an error. Try again.";
-            opts.onError(new MentorError(kind, message));
-            return;
-          }
-        }
-      }
-
-      if (!finished) {
-        opts.onError(new MentorError("server_error", "The response stream ended before completion. Try again.", { retryable: true }));
-      }
-    } catch (err) {
-      // Aborted by the caller (barge-in / new question) — discard silently.
-      if (opts.signal?.aborted) return;
-      const e = err as { message?: string };
-      console.error("[mentor] streamMentorMessage failed", err);
-      opts.onError(new MentorError("network", e?.message ?? "Network error while streaming the reply.", { retryable: true }));
-    }
-  })();
-}
-
-// ============================================================
 // Offline deterministic mentor (used when the edge function or
 // LLM is unavailable — still grounded in real student data)
 // ============================================================
@@ -755,9 +595,6 @@ function syllabusReply(ctx: MentorContext): string {
 
   const done = c.completed;
   const remaining = c.total - done;
-  const perDay = Math.max(1, Math.round(ctx.last7Days.completedCount / 7 * 10) / 10 || 1);
-  const lecturesNeeded = c.pendingLectures;
-  const daysForLectures = lecturesNeeded > 0 ? Math.ceil(lecturesNeeded / Math.max(0.5, (ctx.last7Days.completedCount / 7) * 0.6)) : 0;
 
   lines.push(
     `**Direct Answer**\nYou've completed ${done}/${c.total} chapters (${c.total > 0 ? Math.round((done / c.total) * 100) : 0}%). ${remaining} remain${c.pendingLectures > 0 ? ` with ${c.pendingLectures} lectures still pending` : ""}.`,

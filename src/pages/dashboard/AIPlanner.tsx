@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Sparkles, RefreshCw, Clock, Zap, CheckCircle2, AlertCircle, Loader2,
+  Sparkles, RefreshCw, Clock, Zap, CheckCircle2, Loader2,
   Trash2, Calendar, AlertTriangle, Brain, Flame, Shield, Coffee,
   SkipForward, RotateCcw, Lightbulb, BookOpen, Sigma, FileQuestion,
   ClipboardList, PlayCircle, ChevronDown, TrendingUp,
@@ -10,10 +10,13 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { db } from "../../services/db";
 import {
-  generatePlan, onTaskStatusChange, processMissedTasks,
+  onTaskStatusChange, processMissedTasks,
   validatePlannerInput, PlannerError,
-  type PlannerDiagnostics, type CoachingSummary,
 } from "../../services/planner/index";
+import {
+  generateCoachingPlan, getCoachingType,
+  type CoachingPlannerResult,
+} from "../../services/planner/coachingPlanner";
 import { selectedHoursFor } from "../../services/habitStats";
 import { Card, CardBody, SectionTitle, Button, EmptyState, ProgressBar } from "../../components/ui";
 import { ENERGY_LEVELS, minutesToHM, todayISODate, TASK_TYPE_LABELS } from "../../lib/constants";
@@ -50,6 +53,8 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   critical: "Critical", high: "High", medium: "Medium", low: "Low",
 };
 
+type CoachingDiagnostics = CoachingPlannerResult["diagnostics"];
+
 export default function AIPlanner() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -64,16 +69,46 @@ export default function AIPlanner() {
   const [notes, setNotes] = useState("");
   const [completedToday, setCompletedToday] = useState("");
   const [unexpectedEvents, setUnexpectedEvents] = useState("");
-  const [diagnostics, setDiagnostics] = useState<PlannerDiagnostics | null>(null);
-  const [coaching, setCoaching] = useState<CoachingSummary | null>(null);
-  const [showCoachDetails, setShowCoachDetails] = useState(true);
+  const [diagnostics, setDiagnostics] = useState<CoachingDiagnostics | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [recoveryPending, setRecoveryPending] = useState(0);
   const [showCompleted, setShowCompleted] = useState(true);
 
-  useEffect(() => { load(); }, [date]);
+  // Refetch whenever the selected date changes. The fetch is inlined in the
+  // effect (React's documented fetch-on-mount shape); the loading flip happens
+  // during render when the date changes so the spinner shows immediately.
+  const [prevLoadDate, setPrevLoadDate] = useState(date);
+  if (prevLoadDate !== date) {
+    setPrevLoadDate(date);
+    setLoading(true);
+  }
 
-  async function load() {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [t, saved] = await Promise.all([db.getTasksForDate(date), db.getDailyPlanInputs(date)]);
+        if (cancelled) return;
+        setTasks(t);
+        if (saved) {
+          setHours(saved.study_hours); setEnergy(saved.energy_level as EnergyLevel); setSchoolDay(saved.was_school_day); setExamTomorrow(saved.exam_tomorrow);
+        } else if (profile) {
+          const defaults = selectedHoursFor(profile, new Date(`${date}T00:00:00`));
+          if (defaults > 0) setHours(defaults);
+        }
+        const recovery = await db.getRecoveryItems("pending").catch(() => []);
+        if (!cancelled) setRecoveryPending(recovery.length);
+      } catch (err) {
+        console.error("[AIPlanner] load threw", err);
+        if (!cancelled) setTasks([]);
+      } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [date, profile]);
+
+  // Shared refetch for event handlers (delete-task recovery). Handler calls
+  // may flip `loading` synchronously — only effect bodies cannot.
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [t, saved] = await Promise.all([db.getTasksForDate(date), db.getDailyPlanInputs(date)]);
@@ -90,7 +125,7 @@ export default function AIPlanner() {
       console.error("[AIPlanner] load threw", err);
       setTasks([]);
     } finally { setLoading(false); }
-  }
+  }, [date, profile]);
 
   const activeTasks = useMemo(() => tasks.filter((t) => {
     const s = t.task_status ?? (t.completed ? "completed" : "pending");
@@ -103,12 +138,10 @@ export default function AIPlanner() {
   }), [tasks]);
 
   const completedCount = completedTasks.length;
-  const totalMinutes = useMemo(() => tasks.reduce((a, t) => a + t.estimated_minutes, 0), [tasks]);
   const completedMinutes = useMemo(() => completedTasks.reduce((a, t) => a + t.estimated_minutes, 0), [completedTasks]);
   const remainingMinutes = useMemo(() => activeTasks.reduce((a, t) => a + t.estimated_minutes, 0), [activeTasks]);
   const completionPct = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
   const requestedMinutes = Math.round(hours * 60);
-  const revisionDueToday = useMemo(() => coaching?.revisionSchedule.filter((ev) => ev.dueInDays === 0) ?? [], [coaching]);
 
   async function generate() {
     setGenerateError(null);
@@ -127,8 +160,10 @@ export default function AIPlanner() {
       const yesterday = new Date(date + "T00:00:00"); yesterday.setDate(yesterday.getDate() - 1);
       await processMissedTasks(yesterday.toISOString().slice(0, 10)).catch(() => {});
 
-      const result = await generatePlan(plannerInput);
-      console.info("[AIPlanner] planner output:", { taskCount: result.tasks.length, diagnostics: result.diagnostics });
+      // Use the coaching-type-aware planner (online/offline)
+      const coachingType = getCoachingType(profile);
+      const result = await generateCoachingPlan(plannerInput);
+      console.info("[AIPlanner] coaching planner output:", { taskCount: result.tasks.length, coachingType, diagnostics: result.diagnostics });
 
       if (!result.tasks || result.tasks.length === 0) {
         const m = "The planner produced 0 tasks. See console for diagnostics.";
@@ -149,14 +184,10 @@ export default function AIPlanner() {
 
       setTasks(result.tasks);
       setDiagnostics(result.diagnostics);
-      setCoaching(result.coaching);
       const recovery = await db.getRecoveryItems("pending").catch(() => []);
       setRecoveryPending(recovery.length);
 
-      if (result.diagnostics.burnout.detected) {
-        toast.info(`Burnout detected (${result.diagnostics.burnout.level}) — plan adjusted`);
-      }
-      toast.success(`Plan generated: ${minutesToHM(result.diagnostics.scheduledMinutes)} across ${result.tasks.length} tasks (${result.diagnostics.utilizationPct}% of available time)`);
+      toast.success(`Plan generated: ${minutesToHM(result.diagnostics.scheduledMinutes)} across ${result.tasks.length} tasks (${coachingType} coaching)`);
     } catch (err) {
       console.error("[AIPlanner] generate threw:", err);
       const reason = err instanceof PlannerError ? err.message : describeError(err);
@@ -197,7 +228,7 @@ export default function AIPlanner() {
   }
 
   async function clearDay() {
-    try { await db.deleteTasksForDate(date); setTasks([]); setDiagnostics(null); setCoaching(null); setGenerateError(null); toast.success("Day cleared"); }
+    try { await db.deleteTasksForDate(date); setTasks([]); setDiagnostics(null); setGenerateError(null); toast.success("Day cleared"); }
     catch (err) { console.error("[AIPlanner] clearDay threw", err); toast.error(`Failed: ${describeError(err)}`); }
   }
 
@@ -251,7 +282,7 @@ export default function AIPlanner() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-white flex items-center gap-2"><Sparkles className="w-5 h-5 text-accent-400" /> AI Planner</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Intelligent scheduling that prioritizes your active chapters and adapts to your progress.</p>
+        <p className="text-sm text-slate-500 mt-0.5">Intelligent scheduling that adapts to your coaching style (online/offline), workload, and progress.</p>
       </div>
 
       {/* Daily Input Form */}
@@ -308,7 +339,10 @@ export default function AIPlanner() {
         <>
           <Card><CardBody className="flex items-start gap-3">
             <div className="w-9 h-9 rounded-xl bg-accent-600/20 flex items-center justify-center shrink-0"><Lightbulb className="w-5 h-5 text-accent-400" /></div>
-            <div><p className="text-sm font-medium text-white">{diagnostics.motivationalInsight}</p></div>
+            <div>
+              <p className="text-sm font-medium text-white">{diagnostics.motivationalInsight}</p>
+              <p className="text-xs text-slate-500 mt-1 capitalize">Coaching type: {diagnostics.coachingType}</p>
+            </div>
           </CardBody></Card>
 
           {burnout && burnout.detected && (
@@ -331,95 +365,26 @@ export default function AIPlanner() {
             <Card><CardBody className="text-center"><p className="text-2xl font-bold text-white">{diagnostics.estimatedFinishTime}</p><p className="text-xs text-slate-500 mt-1">Est. finish</p></CardBody></Card>
           </div>
 
-          {diagnostics.habitCalibration && (
-            <Card><CardBody className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-success-600/20 flex items-center justify-center shrink-0"><TrendingUp className="w-5 h-5 text-success-400" /></div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-white">Adaptive planner {diagnostics.habitCalibration.active ? "active" : "learning"}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{diagnostics.habitCalibration.message || "Observing your study rhythm — plans will adapt after a few days."}</p>
-                {diagnostics.habitCalibration.daysObserved > 0 && (
-                  <p className="text-[11px] text-slate-500 mt-1.5">
-                    {diagnostics.habitCalibration.daysObserved}d tracked · {diagnostics.habitCalibration.completionRate === null ? "n/a" : `${Math.round(diagnostics.habitCalibration.completionRate * 100)}%`} completion · {Math.round(diagnostics.habitCalibration.avgCompletedMinutes / 60 * 10) / 10}h/day actual
-                    {diagnostics.habitCalibration.bestSlot ? ` · best slot: ${diagnostics.habitCalibration.bestSlot}` : ""}
-                  </p>
-                )}
-              </div>
-            </CardBody></Card>
-          )}
+          {/* Time Allocation */}
+          <Card><CardBody>
+            <p className="text-sm font-medium text-white flex items-center gap-2"><Brain className="w-4 h-4 text-accent-400" /> Time allocation ({diagnostics.coachingType} coaching)</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              {Object.entries(diagnostics.timeAllocation).map(([key, minutes]) => (
+                <div key={key} className="rounded-xl bg-white/5 p-3 text-center">
+                  <p className="text-lg font-bold text-white">{minutesToHM(minutes)}</p>
+                  <p className="text-xs text-slate-500 mt-1 capitalize">{key.replace(/([A-Z])/g, " $1").trim()}</p>
+                </div>
+              ))}
+            </div>
+          </CardBody></Card>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card><CardBody className="flex items-center gap-2"><Brain className="w-4 h-4 text-accent-400" /><div><p className="text-sm font-semibold text-white">{diagnostics.revisionTasksIncluded}</p><p className="text-xs text-slate-500">Revision tasks</p></div></CardBody></Card>
-            <Card><CardBody className="flex items-center gap-2"><RotateCcw className="w-4 h-4 text-warning-400" /><div><p className="text-sm font-semibold text-white">{diagnostics.recoveryTasksIncluded}</p><p className="text-xs text-slate-500">Recovery tasks</p></div></CardBody></Card>
+            <Card><CardBody className="flex items-center gap-2"><Brain className="w-4 h-4 text-accent-400" /><div><p className="text-sm font-semibold text-white">{diagnostics.byType.revision ?? 0}</p><p className="text-xs text-slate-500">Revision tasks</p></div></CardBody></Card>
+            <Card><CardBody className="flex items-center gap-2"><RotateCcw className="w-4 h-4 text-warning-400" /><div><p className="text-sm font-semibold text-white">{diagnostics.byType.backlog ?? 0}</p><p className="text-xs text-slate-500">Backlog tasks</p></div></CardBody></Card>
             <Card><CardBody className="flex items-center gap-2"><Coffee className="w-4 h-4 text-slate-400" /><div><p className="text-sm font-semibold text-white">{diagnostics.breakMinutes}m</p><p className="text-xs text-slate-500">Break time</p></div></CardBody></Card>
             <Card><CardBody className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-success-400" /><div><p className="text-sm font-semibold text-white">{completionPct}%</p><p className="text-xs text-slate-500">Day progress</p></div></CardBody></Card>
           </div>
         </>
-      )}
-
-      {/* Coach's Corner */}
-      {coaching && (
-        <Card><CardBody className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-accent-600/20 flex items-center justify-center shrink-0"><Brain className="w-5 h-5 text-accent-400" /></div>
-            <div>
-              <p className="text-sm font-medium text-white">Coach's Corner</p>
-              <p className="text-xs text-slate-500 mt-0.5">The reasoning behind today's plan</p>
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-white/5 p-4">
-            <p className="text-[11px] uppercase tracking-wide text-slate-500">Today's goal</p>
-            <p className="text-sm font-medium text-white mt-1">{coaching.dailyGoal}</p>
-            <div className="flex flex-wrap items-center gap-2 mt-3">
-              <span className="text-xs px-2 py-1 rounded-lg bg-accent-600/10 text-accent-400 border border-accent-600/20">Confidence: {coaching.confidenceScore}/100 · {coaching.confidenceLabel}</span>
-              <span className="text-xs px-2 py-1 rounded-lg bg-success-600/10 text-success-400 border border-success-600/20">Utilization: {diagnostics?.utilizationPct ?? 0}%</span>
-              <span className="text-xs px-2 py-1 rounded-lg bg-white/5 text-slate-400">{coaching.energyRead}</span>
-              <span className="text-xs px-2 py-1 rounded-lg bg-white/5 text-slate-400">{coaching.completionTarget}</span>
-              {coaching.prevDay?.completionRate !== null && coaching.prevDay !== null && (
-                <span className="text-xs px-2 py-1 rounded-lg bg-white/5 text-slate-400">Yesterday: {Math.round(coaching.prevDay.completionRate * 100)}% done · {coaching.prevDay.skippedCount} skipped · {minutesToHM(coaching.prevDay.studiedMinutes)} studied</span>
-              )}
-            </div>
-            {revisionDueToday.length > 0 && (
-              <p className="text-xs text-accent-400 mt-3">Revision due today: {revisionDueToday.map((ev) => `${ev.subject} · ${ev.chapter} (Rev #${ev.revisionNumber})`).join(" · ")}</p>
-            )}
-          </div>
-
-          <p className="text-sm text-slate-300 flex items-start gap-2"><Lightbulb className="w-4 h-4 text-accent-400 mt-0.5 shrink-0" />{coaching.motivation}</p>
-
-          <button onClick={() => setShowCoachDetails((s) => !s)} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white">
-            <ChevronDown className={`w-4 h-4 transition-transform ${showCoachDetails ? "" : "-rotate-90"}`} />
-            {showCoachDetails ? "Hide" : "Show"} coach details
-          </button>
-
-          {showCoachDetails && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-1">
-              <div className="rounded-xl bg-white/5 p-3">
-                <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5"><Lightbulb className="w-3.5 h-3.5 text-accent-400" /> Why each task</p>
-                {coaching.taskReasons.length === 0 ? <p className="text-xs text-slate-600 mt-2">No tasks yet.</p> : (
-                  <ul className="mt-2 space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                    {coaching.taskReasons.map((r) => <li key={r.title} className="text-xs text-slate-400"><span className="text-slate-200 font-medium">{r.title}</span> — {r.reason}</li>)}
-                  </ul>
-                )}
-              </div>
-              <div className="rounded-xl bg-white/5 p-3">
-                <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5"><SkipForward className="w-3.5 h-3.5 text-warning-400" /> Carried forward</p>
-                {coaching.carryForward.length === 0 ? <p className="text-xs text-slate-600 mt-2">Nothing pending — backlog is balanced.</p> : (
-                  <ul className="mt-2 space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                    {coaching.carryForward.map((c) => <li key={c.title} className="text-xs text-slate-400"><span className="text-slate-200 font-medium">{c.title}</span> — {c.reason}</li>)}
-                  </ul>
-                )}
-              </div>
-              <div className="rounded-xl bg-white/5 p-3">
-                <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5"><RotateCcw className="w-3.5 h-3.5 text-accent-400" /> Revision rhythm (14 days)</p>
-                {coaching.revisionSchedule.length === 0 ? <p className="text-xs text-slate-600 mt-2">No revisions scheduled yet.</p> : (
-                  <ul className="mt-2 space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                    {coaching.revisionSchedule.map((ev) => <li key={`${ev.subject}|${ev.chapter}|${ev.revisionNumber}`} className="text-xs text-slate-400"><span className="text-slate-200 font-medium">{ev.subject} · {ev.chapter}</span> — {ev.label} in {ev.dueInDays}d</li>)}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-        </CardBody></Card>
       )}
 
       {/* Active Tasks */}

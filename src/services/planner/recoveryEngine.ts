@@ -104,7 +104,7 @@ export async function getRecoveryTasksForDay(maxMinutes: number): Promise<Recove
   if (scheduledIds.size > 0) {
     const today = new Date().toISOString().slice(0, 10);
     for (const id of scheduledIds) {
-      try { await db.markRecoveryScheduled(id, today); } catch {}
+      try { await db.markRecoveryScheduled(id, today); } catch { /* best-effort — plan still works */ }
     }
   }
   return selected;

@@ -207,7 +207,7 @@ Deno.serve(async (req: Request) => {
       const parts = path.split("/");
       const action = parts[2]; // /users/:action
       const body = await req.json();
-      const { targetUserId, targetEmail, role, reason } = body;
+      const { targetUserId, role, reason } = body;
 
       if (!targetUserId) {
         return new Response(JSON.stringify({ error: "targetUserId is required" }), {
@@ -236,11 +236,10 @@ Deno.serve(async (req: Request) => {
               status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
-          // Never allow changing a super_admin's role
-          if (target.role === "super_admin" && !SUPER_ADMIN_EMAILS.includes(target.email)) {
-            // Edge case: someone was manually set to super_admin in DB — still protect
-          }
-          if (SUPER_ADMIN_EMAILS.includes(target.email)) {
+          // Never allow changing a super_admin's role (covers DB-manually-seeded
+          // super_admins: a role of super_admin is only granted via this API or
+          // seeding, and both paths keep the email in SUPER_ADMIN_EMAILS)
+          if (target.role === "super_admin" || SUPER_ADMIN_EMAILS.includes(target.email)) {
             return new Response(JSON.stringify({ error: "Cannot modify super_admin accounts" }), {
               status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });

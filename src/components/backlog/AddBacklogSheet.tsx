@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Minus, Plus, CalendarDays, AlertTriangle, Layers } from "lucide-react";
 import type { BacklogItem, BacklogKind, BacklogDifficulty, BacklogResourceProgress, Priority, SmartBacklogInput } from "../../lib/types";
@@ -86,54 +86,77 @@ export function AddBacklogSheet({ open, onClose, items, exam: activeExam, preset
     return [...new Set([...fromSyllabus, ...custom])];
   }, [exam, subject, items]);
 
-  useEffect(() => {
-    if (!open) return;
-    // The sheet is always scoped to the active exam — never to another one.
-    setExam(activeExam);
-    if (editItem) {
-      setMode("edit");
-      setSubject(editItem.subject ?? "Physics");
-      setChapter(editItem.chapter ?? "");
-      const res = extractBacklogResources(editItem);
-      const kinds = Object.keys(res).filter((k) => (res[k as BacklogKind]?.total ?? 0) > 0);
-      setKind((kinds[0] as BacklogKind) ?? null);
-      setResources(res);
-      setBulkKinds(kinds as BacklogKind[]);
-      setPriority(editItem.priority ?? "medium");
-      const data = editItem.backlog_data as { difficulty?: BacklogDifficulty } | null;
-      setDifficulty(editItem.difficulty ?? data?.difficulty ?? "medium");
-      setDueDate(editItem.due_date ?? "");
-      setDuplicate(null);
-    } else {
-      setMode(preset?.bulk ? "bulk" : "add");
-      setSubject(preset?.subject ?? "Physics");
-      setChapter("");
-      const k = preset?.kind ?? null;
-      setKind(k);
-      setResources(k ? { [k]: { total: resourceMeta(k).defaultTotal, completed: 0 } } : {});
-      setBulkKinds([]);
-      setPriority("medium");
-      setDifficulty("medium");
-      setDueDate("");
-      setDuplicate(null);
+  // Seed the form whenever the sheet opens (or the target item/preset changes
+  // while open). Render-phase adjustment ("adjusting state when a prop
+  // changes") — the seed lands in the same commit that opens the sheet
+  // instead of cascading through an effect.
+  const seedKey = open
+    ? editItem
+      ? `edit:${editItem.id}:${activeExam}`
+      : `add:${preset?.bulk ? "bulk" : "add"}:${preset?.subject ?? ""}:${preset?.kind ?? ""}:${activeExam}`
+    : "closed";
+  const [prevSeedKey, setPrevSeedKey] = useState(seedKey);
+  if (seedKey !== prevSeedKey) {
+    setPrevSeedKey(seedKey);
+    if (seedKey !== "closed") {
+      // The sheet is always scoped to the active exam — never to another one.
+      setExam(activeExam);
+      if (editItem) {
+        setMode("edit");
+        setSubject(editItem.subject ?? "Physics");
+        setChapter(editItem.chapter ?? "");
+        const res = extractBacklogResources(editItem);
+        const kinds = Object.keys(res).filter((k) => (res[k as BacklogKind]?.total ?? 0) > 0);
+        setKind((kinds[0] as BacklogKind) ?? null);
+        setResources(res);
+        setBulkKinds(kinds as BacklogKind[]);
+        setPriority(editItem.priority ?? "medium");
+        const data = editItem.backlog_data as { difficulty?: BacklogDifficulty } | null;
+        setDifficulty(editItem.difficulty ?? data?.difficulty ?? "medium");
+        setDueDate(editItem.due_date ?? "");
+      } else {
+        setMode(preset?.bulk ? "bulk" : "add");
+        setSubject(preset?.subject ?? "Physics");
+        setChapter("");
+        const k = preset?.kind ?? null;
+        setKind(k);
+        setResources(k ? { [k]: { total: resourceMeta(k).defaultTotal, completed: 0 } } : {});
+        setBulkKinds([]);
+        setPriority("medium");
+        setDifficulty("medium");
+        setDueDate("");
+      }
     }
-  }, [open, editItem, preset, activeExam]);
+  }
 
-  useEffect(() => {
-    if (!open || mode === "update") return;
-    if (!subject || !chapter || !kind) { setDuplicate(null); return; }
-    const dup = items.find(
-      (i) => i.id !== editItem?.id && i.subject === subject && i.chapter === chapter && (i.backlog_types ?? []).includes(kind),
-    ) ?? null;
-    if (dup) {
-      const r = extractBacklogResources(dup)[kind] ?? { total: 0, completed: 0 };
-      setDuplicate(dup);
-      setDupTotal(r.total);
-      setDupCompleted(r.completed);
-    } else {
-      setDuplicate(null);
+  // Duplicate detection — pure function of the current form inputs, so it
+  // re-runs in render whenever one of those inputs changes (the "detected
+  // duplicate" resets are render-phase too, keeping the warning UI in the
+  // same commit as the form field that triggered it).
+  const dupInputKey = open && mode !== "update"
+    ? `${subject}|${chapter}|${kind}|${editItem?.id ?? ""}|${items.map((i) => `${i.id}:${(i.backlog_types ?? []).join(",")}`).join(";")}`
+    : "idle";
+  const [prevDupKey, setPrevDupKey] = useState(dupInputKey);
+  if (dupInputKey !== prevDupKey) {
+    setPrevDupKey(dupInputKey);
+    if (dupInputKey !== "idle") {
+      if (!subject || !chapter || !kind) {
+        setDuplicate(null);
+      } else {
+        const dup = items.find(
+          (i) => i.id !== editItem?.id && i.subject === subject && i.chapter === chapter && (i.backlog_types ?? []).includes(kind),
+        ) ?? null;
+        if (dup) {
+          const r = extractBacklogResources(dup)[kind] ?? { total: 0, completed: 0 };
+          setDuplicate(dup);
+          setDupTotal(r.total);
+          setDupCompleted(r.completed);
+        } else {
+          setDuplicate(null);
+        }
+      }
     }
-  }, [open, subject, chapter, kind, mode, items, editItem]);
+  }
 
   function setResource(k: BacklogKind, field: "total" | "completed", v: number) {
     setResources((prev) => {

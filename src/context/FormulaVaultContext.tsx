@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import type { FormulaVaultData } from '../types';
 import { loadFormulaVault, saveFormulaVault } from '../lib/storage';
 import { useAuth } from './AuthContext';
@@ -32,13 +32,16 @@ export function FormulaVaultProvider({ children }: { children: ReactNode }) {
     frequentlyUsed: [],
   });
 
-  useEffect(() => {
-    if (!user) {
-      setData({ favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] });
-      return;
-    }
-    setData(loadFormulaVault(user.id));
-  }, [user]);
+  // Load the per-user vault when the signed-in identity changes (or reset it
+  // when signed out). Render-phase adjustment keyed on the user object — the
+  // load commits with the auth change, and the initializer covers first mount.
+  const [prevUser, setPrevUser] = useState(user);
+  if (prevUser !== user) {
+    setPrevUser(user);
+    setData(user
+      ? loadFormulaVault(user.id)
+      : { favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] });
+  }
 
   const persist = useCallback((nd: FormulaVaultData) => {
     setData(nd);

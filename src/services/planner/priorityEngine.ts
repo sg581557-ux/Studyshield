@@ -47,7 +47,7 @@ function daysSinceUpdated(updatedAt: string | null | undefined): number {
 
 export function computeChapterPriority(
   uc: UserChapter,
-  backlog: BacklogItem[],
+  _backlog: BacklogItem[],
   recovery: RecoveryItem[],
   profile: Profile,
 ): { score: number; factors: PriorityFactors } {
@@ -61,7 +61,6 @@ export function computeChapterPriority(
   const difficulty = normalize((uc.progress?.difficulty as number) ?? 3, 5);
   const weaknessScore = normalize(5 - (uc.confidence ?? 3), 5);
   const daysIgnored = normalize(daysSinceUpdated(uc.updated_at), 14);
-  const chapterKey = `${uc.subject}|${uc.chapter}`;
   const recoveryUrgency = normalize(
     recovery.filter((r) => r.subject === uc.subject && r.chapter === uc.chapter && r.recovery_status === "pending").length,
     10,

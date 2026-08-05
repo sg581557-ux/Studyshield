@@ -5,7 +5,8 @@ import { ShieldCheck, Mail, User } from "lucide-react";
 import { useAuth, authErrorMessage } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { Button } from "../components/ui";
-import { PasswordInput, PasswordRequirements, passwordMeetsRequirements } from "../components/auth/PasswordInput";
+import { PasswordInput, PasswordRequirements } from "../components/auth/PasswordInput";
+import { passwordMeetsRequirements } from "../lib/passwordRules";
 import { GoogleSignInButton } from "../components/auth/GoogleSignInButton";
 
 export default function Signup() {

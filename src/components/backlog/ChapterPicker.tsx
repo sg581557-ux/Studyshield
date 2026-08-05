@@ -23,10 +23,15 @@ export function ChapterPicker({ chapters, value, onChange, placeholder = "Search
   const isExact = suggestions[0]?.toLowerCase() === query.trim().toLowerCase();
   const showCustom = allowCustom && query.trim().length > 0 && !isExact;
 
-  useEffect(() => {
+  // Keep the input text in sync with the parent's `value` prop. Render-phase
+  // adjustment so a controlled-value change and the query reset commit
+  // together instead of cascading through an effect.
+  const [prevValue, setPrevValue] = useState(value);
+  if (prevValue !== value) {
+    setPrevValue(value);
     setQuery(value);
     setHighlight(0);
-  }, [value]);
+  }
 
   useEffect(() => {
     const h = (e: MouseEvent) => {

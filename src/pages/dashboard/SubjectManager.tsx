@@ -3,7 +3,7 @@ import { BookMarked, Loader2 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { db } from "../../services/db";
 import { Card, CardBody, EmptyState } from "../../components/ui";
-import { CHAPTER_STATUS_OPTIONS, CHAPTER_STATUS_LABELS, CHAPTER_STATUS_COLORS } from "../../lib/constants";
+import { CHAPTER_STATUS_OPTIONS, CHAPTER_STATUS_LABELS } from "../../lib/constants";
 import type { ChapterStatus, SyllabusSubject, UserChapter } from "../../lib/types";
 
 export default function SubjectManager() {
@@ -14,21 +14,36 @@ export default function SubjectManager() {
   const [loading, setLoading] = useState(true);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
 
-  useEffect(() => { load(); }, [profile?.target_exam]);
-  async function load() {
-    if (!profile?.target_exam) { setLoading(false); return; }
+  // Refetch the syllabus whenever the target exam changes. The fetch is
+  // inlined in the effect (React's documented fetch-on-mount shape); the
+  // loading flip happens during render when the exam changes so the spinner
+  // shows immediately.
+  const [prevExam, setPrevExam] = useState<string | null | undefined>(profile?.target_exam);
+  if (prevExam !== profile?.target_exam) {
+    setPrevExam(profile?.target_exam);
     setLoading(true);
-    try {
-      const subs = await db.getSubjects(profile.target_exam);
-      setSubjects(subs);
-      const map: Record<string, { id: string; name: string }[]> = {};
-      await Promise.all(subs.map(async (s) => { map[s.id] = (await db.getChapters(s.id)).map((c) => ({ id: c.id, name: c.name })); }));
-      setChapters(map);
-      setUcs(await db.getUserChapters());
-      if (subs[0]) setActiveSubject(subs[0].id);
-    } catch { setSubjects([]); }
-    finally { setLoading(false); }
   }
+
+  useEffect(() => {
+    const target = profile?.target_exam;
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const subs = await db.getSubjects(target);
+        if (cancelled) return;
+        setSubjects(subs);
+        const map: Record<string, { id: string; name: string }[]> = {};
+        await Promise.all(subs.map(async (s) => { map[s.id] = (await db.getChapters(s.id)).map((c) => ({ id: c.id, name: c.name })); }));
+        if (cancelled) return;
+        setChapters(map);
+        setUcs(await db.getUserChapters());
+        if (subs[0]) setActiveSubject(subs[0].id);
+      } catch { if (!cancelled) setSubjects([]); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.target_exam]);
 
   async function setStatus(subject: string, chapter: string, status: ChapterStatus) {
     try { await db.upsertUserChapter({ exam: profile!.target_exam!, subject, chapter, status }); setUcs(await db.getUserChapters()); }

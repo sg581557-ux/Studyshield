@@ -1,666 +1,838 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from "react";
+import { useMounted } from "../../lib/useMounted";
+import { motion, useReducedMotion } from "framer-motion";
+import { Link } from "react-router-dom";
 import {
-  motion,
-  useInView,
-  useMotionValue,
-  useReducedMotion,
-  useSpring,
-  useTransform,
-} from 'framer-motion';
-import { Link } from 'react-router-dom';
-import {
-  Activity,
-  ArrowRight,
-  Atom,
   Brain,
   CalendarCheck,
-  CheckCircle2,
-  ClipboardList,
   Clock3,
-  FileQuestion,
-  FlaskConical,
-  Flame,
   Gauge,
-  GraduationCap,
   Layers,
-  MonitorPlay,
-  NotebookPen,
   Play,
-  RotateCcw,
+  RotateCw,
   Shield,
-  Sigma,
   Sparkles,
   Target,
-  Timer,
   TrendingUp,
-  Trophy,
-  type LucideIcon,
-} from 'lucide-react';
-
-const NeuralNetwork = lazy(() => import('./NeuralNetwork'));
+  Zap,
+} from "lucide-react";
 
 const EASE_OPEN: [number, number, number, number] = [0.65, 0, 0.35, 1];
-const EASE_FLY: [number, number, number, number] = [0.6, 0, 0.3, 1];
 
-const SCENE_W = 980;
-const SCENE_H = 780;
-const CX = 490;
-const CY = 430;
-const RX = 402;
-const RY = 208;
-const ORBIT_STEPS = 60;
-
-const rad = (deg: number) => (deg * Math.PI) / 180;
-
-const GRAIN =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E\")";
-
-interface OrbitItem {
+interface ScheduleTask {
   id: string;
+  time: string;
+  subject: string;
+  title: string;
+  done: boolean;
+  color: string;
+}
+
+interface SubjectCard {
+  id: string;
+  name: string;
+  progress: number;
+  color: string;
+  icon: React.ReactNode;
+}
+
+interface MobileScheduleTask {
+  id: string;
+  time: string;
+  title: string;
+  progress: number;
+}
+
+interface FeatureBadge {
   label: string;
-  icon: LucideIcon;
-  color: string;
-  angle: number;
-  rf: number;
-  dur: number;
-  firstFly: number;
-  floatDur: number;
-  floatDelay: number;
+  icon: React.ReactNode;
+  color: "cyan" | "emerald" | "violet" | "blue";
 }
 
-const ORBIT_ITEMS: OrbitItem[] = [
-  { id: 'physics', label: 'Physics', icon: Atom, color: '#38bdf8', angle: 0, rf: 1, dur: 46, firstFly: 7800, floatDur: 5.6, floatDelay: 0 },
-  { id: 'chemistry', label: 'Chemistry', icon: FlaskConical, color: '#a78bfa', angle: 40, rf: 0.94, dur: 41, firstFly: 10200, floatDur: 6.4, floatDelay: 0.5 },
-  { id: 'maths', label: 'Maths', icon: Sigma, color: '#34d399', angle: 80, rf: 1.04, dur: 49, firstFly: 12400, floatDur: 5.2, floatDelay: 1 },
-  { id: 'lectures', label: 'Lectures', icon: MonitorPlay, color: '#60a5fa', angle: 120, rf: 0.96, dur: 43, firstFly: 8800, floatDur: 6.8, floatDelay: 0.3 },
-  { id: 'pyqs', label: 'PYQs', icon: FileQuestion, color: '#f472b6', angle: 160, rf: 1.06, dur: 52, firstFly: 13500, floatDur: 5.8, floatDelay: 0.9 },
-  { id: 'dpps', label: 'DPPs', icon: ClipboardList, color: '#fbbf24', angle: 200, rf: 0.92, dur: 38, firstFly: 9600, floatDur: 6, floatDelay: 0.6 },
-  { id: 'mocktests', label: 'Mock Tests', icon: GraduationCap, color: '#fb7185', angle: 240, rf: 1.02, dur: 45, firstFly: 14200, floatDur: 5.4, floatDelay: 1.2 },
-  { id: 'revision', label: 'Revision', icon: RotateCcw, color: '#22d3ee', angle: 280, rf: 0.9, dur: 40, firstFly: 11200, floatDur: 6.2, floatDelay: 0.7 },
-  { id: 'notes', label: 'Notes', icon: NotebookPen, color: '#c084fc', angle: 320, rf: 0.98, dur: 48, firstFly: 15600, floatDur: 5, floatDelay: 1.4 },
+const MOBILE_SCHEDULE_TASKS: MobileScheduleTask[] = [
+  { id: "1", time: "08:00", title: "Physics Lecture", progress: 90 },
+  { id: "2", time: "10:00", title: "Maths Practice", progress: 60 },
+  { id: "3", time: "13:00", title: "Chemistry Revision", progress: 80 },
+  { id: "4", time: "16:00", title: "PYQs", progress: 50 },
 ];
 
-const TASKS = [
-  { time: '7:00 AM', sub: 'Physics', title: 'Rotational Motion · Lecture 2', done: true, chip: 'text-cyan-300 bg-cyan-400/10 border-cyan-400/25' },
-  { time: '9:30 AM', sub: 'Maths', title: 'Calculus · 30 practice Qs', done: true, chip: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/25' },
-  { time: '4:00 PM', sub: 'Chemistry', title: 'States of Matter · DPP + revision', done: false, chip: 'text-violet-300 bg-violet-400/10 border-violet-400/25' },
+const FEATURE_BADGES: FeatureBadge[] = [
+  { label: "AI Optimized", icon: <Brain className="h-3 w-3" />, color: "cyan" },
+  { label: "Adaptive Schedule", icon: <RotateCw className="h-3 w-3" />, color: "emerald" },
+  { label: "Backlog Reduced", icon: <TrendingUp className="h-3 w-3" />, color: "violet" },
+  { label: "Smart Revision", icon: <Target className="h-3 w-3" />, color: "blue" },
 ];
 
-const PRIORITIES = [
-  { label: 'Rotational Motion', tag: 'Weakest · New', pct: 82, bar: 'from-rose-400 to-orange-400', dot: '#fb7185' },
-  { label: 'Calculus Backlog', tag: '3 topics pending', pct: 64, bar: 'from-cyan-400 to-blue-500', dot: '#22d3ee' },
+const SCHEDULE_TASKS: ScheduleTask[] = [
+  {
+    id: "1",
+    time: "7:00 AM",
+    subject: "Physics",
+    title: "Rotational Motion · Lecture 2",
+    done: true,
+    color: "cyan",
+  },
+  {
+    id: "2",
+    time: "9:30 AM",
+    subject: "Maths",
+    title: "Calculus · 30 practice Qs",
+    done: true,
+    color: "emerald",
+  },
+  {
+    id: "3",
+    time: "4:00 PM",
+    subject: "Chemistry",
+    title: "States of Matter · DPP + revision",
+    done: false,
+    color: "violet",
+  },
 ];
 
-const REVISION = [
-  { label: 'Thermodynamics', due: 'Today', hot: true },
-  { label: 'Kinematics', due: 'Tomorrow', hot: false },
-  { label: 'Ionic Equilibrium', due: 'Fri', hot: false },
+const SUBJECT_CARDS: SubjectCard[] = [
+  {
+    id: "physics",
+    name: "Physics",
+    progress: 82,
+    color: "from-cyan-400 to-blue-500",
+    icon: <Layers className="h-3.5 w-3.5 text-cyan-300" />,
+  },
+  {
+    id: "maths",
+    name: "Maths",
+    progress: 64,
+    color: "from-emerald-400 to-teal-500",
+    icon: <Layers className="h-3.5 w-3.5 text-emerald-300" />,
+  },
+  {
+    id: "chemistry",
+    name: "Chemistry",
+    progress: 71,
+    color: "from-violet-400 to-purple-500",
+    icon: <Layers className="h-3.5 w-3.5 text-violet-300" />,
+  },
 ];
 
-const WEEK_BARS = [34, 48, 42, 58, 66, 52, 72];
+const WEEK_PROGRESS = [34, 48, 42, 58, 66, 52, 72];
 
-const SUGGESTION =
-  'You peak between 10 AM and 12 PM — high-focus Physics goes there. 3 backlog topics left to close this week.';
+const AI_SUGGESTION =
+  "You peak between 10 AM and 12 PM — high-focus Physics goes there. 3 backlog topics left to close this week.";
 
-const orbitKeyframes = (startDeg: number, rf: number) => {
-  const kx = new Array<number>(ORBIT_STEPS);
-  const ky = new Array<number>(ORBIT_STEPS);
-  const times = new Array<number>(ORBIT_STEPS);
-  for (let i = 0; i < ORBIT_STEPS; i++) {
-    const a = rad(startDeg) + (i / (ORBIT_STEPS - 1)) * Math.PI * 2;
-    kx[i] = Math.cos(a) * RX * rf;
-    ky[i] = Math.sin(a) * RY * rf;
-    times[i] = i / (ORBIT_STEPS - 1);
-  }
-  return { kx, ky, times };
-};
-
-interface BurstData {
-  id: number;
-  color: string;
+function SubjectChip({ subject }: { subject: ScheduleTask["subject"] }) {
+  const colorMap: Record<string, string> = {
+    Physics: "text-cyan-300 bg-cyan-400/10 border-cyan-400/25",
+    Maths: "text-emerald-300 bg-emerald-400/10 border-emerald-400/25",
+    Chemistry: "text-violet-300 bg-violet-400/10 border-violet-400/25",
+  };
+  return (
+    <span
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[7px] font-semibold ${colorMap[subject] ?? "text-slate-300 bg-white/5 border-white/10"}`}
+    >
+      {subject}
+    </span>
+  );
 }
 
-const AbsorbBursts = ({ bursts }: { bursts: BurstData[] }) => (
-  <>
-    {bursts.map((b) => (
-      <BurstLayer key={b.id} burst={b} />
-    ))}
-  </>
-);
-
-const BurstLayer = ({ burst }: { burst: BurstData }) => {
-  const particles = useMemo(
-    () =>
-      Array.from({ length: 8 }, (_, i) => ({
-        i,
-        angle: Math.random() * Math.PI * 2,
-        dist: 34 + Math.random() * 56,
-        delay: Math.random() * 0.12,
-      })),
-    [burst.id],
-  );
+function PlannerCard() {
+  const reduced = useReducedMotion();
+  const mounted = useMounted();
 
   return (
-    <div className="pointer-events-none absolute z-40" style={{ left: CX, top: CY }}>
-      <motion.span
-        className="absolute h-6 w-6 rounded-full border border-cyan-300/60"
-        style={{ x: '-50%', y: '-50%', boxShadow: `0 0 24px ${burst.color}66` }}
-        initial={{ scale: 0.4, opacity: 1 }}
-        animate={{ scale: 2.6, opacity: 0 }}
-        transition={{ duration: 0.9, ease: 'easeOut' }}
-      />
-      {particles.map((p) => (
-        <motion.span
-          key={p.i}
-          className="absolute h-1.5 w-1.5 rounded-full"
-          style={{ x: '-50%', y: '-50%', backgroundColor: burst.color, boxShadow: `0 0 10px ${burst.color}` }}
-          initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
-          animate={{ x: Math.cos(p.angle) * p.dist, y: Math.sin(p.angle) * p.dist, opacity: 0, scale: 0.2 }}
-          transition={{ duration: 0.8, delay: p.delay, ease: 'easeOut' }}
-        />
-      ))}
-    </div>
-  );
-};
-
-const FlowBeams = ({ active }: { active: boolean }) => {
-  const beams = useMemo(
-    () =>
-      [150, 25, 330, 210].map((deg) => {
-        const a = rad(deg);
-        const sx = CX + Math.cos(a) * (RX + 8);
-        const sy = CY + Math.sin(a) * (RY + 8);
-        const ex = CX + Math.cos(a) * 262;
-        const ey = CY + Math.sin(a) * 158;
-        const mx = (sx + ex) / 2 + Math.sin(a) * 52;
-        const my = (sy + ey) / 2 - Math.cos(a) * 52;
-        return { d: `M ${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}` };
-      }),
-    [],
-  );
-
-  return (
-    <svg
-      className="pointer-events-none absolute inset-0 z-[5]"
-      width={SCENE_W}
-      height={SCENE_H}
-      viewBox={`0 0 ${SCENE_W} ${SCENE_H}`}
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id="beamGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#22d3ee" stopOpacity="0" />
-          <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.9" />
-        </linearGradient>
-      </defs>
-      {beams.map((b, i) => (
-        <motion.path
-          key={i}
-          d={b.d}
-          fill="none"
-          stroke="url(#beamGrad)"
-          strokeWidth="1"
-          strokeLinecap="round"
-          strokeDasharray="5 15"
-          animate={
-            active
-              ? { strokeDashoffset: [-60, 140], opacity: [0.25, 0.65, 0.25] }
-              : { opacity: 0.15 }
-          }
-          transition={{ duration: 3.2, delay: i * 0.7, repeat: Infinity, ease: 'linear' }}
-        />
-      ))}
-    </svg>
-  );
-};
-
-const OrbitCard = ({
-  item,
-  active,
-  onAbsorb,
-}: {
-  item: OrbitItem;
-  active: boolean;
-  onAbsorb: (id: string) => void;
-}) => {
-  const [phase, setPhase] = useState<'orbit' | 'fly' | 'away'>('orbit');
-  const [orbitKey, setOrbitKey] = useState(0);
-
-  useEffect(() => {
-    if (!active || phase === 'orbit') return;
-    setPhase('orbit');
-    setOrbitKey((k) => k + 1);
-  }, [active, phase]);
-
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-    const timers: number[] = [];
-    const at = (t: number, fn: () => void) => timers.push(window.setTimeout(fn, t));
-
-    const loop = (first: boolean) => {
-      at(first ? item.firstFly : 5600 + Math.random() * 4200, () => {
-        if (!alive) return;
-        setPhase('fly');
-        at(1200, () => {
-          if (!alive) return;
-          setPhase('away');
-          onAbsorb(item.id);
-          at(1700, () => {
-            if (!alive) return;
-            setPhase('orbit');
-            setOrbitKey((k) => k + 1);
-            loop(false);
-          });
-        });
-      });
-    };
-    loop(true);
-    return () => {
-      alive = false;
-      timers.forEach((t) => window.clearTimeout(t));
-    };
-  }, [active, item, onAbsorb]);
-
-  const { kx, ky, times } = useMemo(() => orbitKeyframes(item.angle, item.rf), [item]);
-
-  const Icon = item.icon;
-  const chip = (
-    <div
-      className="flex items-center gap-1.5 rounded-xl border bg-white/[0.06] px-2.5 py-1.5 backdrop-blur-md"
-      style={{
-        borderColor: `${item.color}40`,
-        boxShadow: `0 6px 24px rgba(2,6,23,0.45), 0 0 16px ${item.color}2b`,
-        transition: 'border-color .2s ease, box-shadow .2s ease',
-      }}
-    >
-      <Icon className="h-3.5 w-3.5" style={{ color: item.color, filter: `drop-shadow(0 0 6px ${item.color}80)` }} />
-      <span className="whitespace-nowrap text-[10px] font-semibold text-slate-100">{item.label}</span>
-    </div>
-  );
-
-  return (
-    <div className="absolute z-20 -translate-x-1/2 -translate-y-1/2" style={{ left: CX, top: CY }}>
-      <motion.div
-        key={orbitKey}
-        initial={{ x: 0, y: 0, opacity: 0, scale: 0.35, rotate: 260 }}
-        animate={
-          phase === 'orbit'
-            ? { x: kx, y: ky, opacity: 1, scale: 1, rotate: 0 }
-            : { x: 0, y: 0, opacity: 0, scale: 0.06, rotate: 320 }
-        }
-        transition={
-          phase === 'orbit'
-            ? {
-                x: { duration: item.dur, times, repeat: Infinity, ease: 'linear' },
-                y: { duration: item.dur, times, repeat: Infinity, ease: 'linear' },
-                rotate: { duration: 1.2 },
-                opacity: { duration: 0.7 },
-                scale: { duration: 0.7 },
-              }
-            : {
-                x: { duration: 1.15, ease: 'easeIn' },
-                y: { duration: 1.15, ease: 'easeIn' },
-                rotate: { duration: 1.15, ease: 'easeIn' },
-                opacity: { duration: 1.15, ease: 'easeIn' },
-                scale: { duration: 1.15, ease: EASE_FLY },
-              }
-        }
-      >
-        <motion.div
-          className="cursor-pointer"
-          whileHover={{ scale: 1.12 }}
-          animate={active ? { y: [0, -5, 0] } : {}}
-          transition={
-            active
-              ? {
-                  y: { duration: item.floatDur, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: item.floatDelay },
-                }
-              : undefined
-          }
+    <div className="relative w-[340px] max-w-[90vw] overflow-hidden rounded-[28px] border border-white/12 bg-white/[0.045] shadow-[0_30px_80px_-20px_rgba(2,6,23,0.8),0_0_50px_rgba(56,189,248,0.12)] backdrop-blur-2xl">
+      <div className="absolute inset-0">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent" />
+        <div className="absolute -left-24 -top-24 h-52 w-52 rounded-full bg-blue-600/25 blur-3xl" />
+        <div className="absolute -bottom-28 -right-24 h-56 w-56 rounded-full bg-purple-600/20 blur-3xl" />
+        <div
+          className="pointer-events-none absolute inset-0"
           style={{
-            boxShadow: `0 8px 30px rgba(2,6,23,0.5), 0 0 26px ${item.color}45`,
-            borderRadius: 12,
-            transition: 'box-shadow .2s ease',
+            background:
+              "radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,0.06), transparent 55%)",
           }}
-        >
-          {chip}
-        </motion.div>
-      </motion.div>
-    </div>
-  );
-};
-
-const SectionTitle = ({
-  icon: Icon,
-  children,
-  color = 'text-cyan-300',
-}: {
-  icon: LucideIcon;
-  children: React.ReactNode;
-  color?: string;
-}) => (
-  <div className="mb-2 flex items-center gap-1.5">
-    <Icon className={`h-3 w-3 ${color}`} />
-    <span className="text-[8px] font-bold uppercase tracking-widest text-slate-400">{children}</span>
-  </div>
-);
-
-const PlannerPanel = ({ absorbed }: { absorbed: number }) => (
-  <div className="relative overflow-hidden rounded-[24px] border border-white/12 bg-white/[0.055] p-4 shadow-[0_30px_80px_-20px_rgba(2,6,23,0.8),0_0_50px_rgba(56,189,248,0.12)] backdrop-blur-2xl">
-    <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent" />
-    <div className="absolute -left-24 -top-24 h-52 w-52 rounded-full bg-blue-600/25 blur-3xl" />
-    <div className="absolute -bottom-28 -right-24 h-56 w-56 rounded-full bg-purple-600/20 blur-3xl" />
-    <div
-      className="pointer-events-none absolute inset-0"
-      style={{ background: 'radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,0.06), transparent 55%)' }}
-    />
-
-    <div className="relative">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-[0_0_18px_rgba(34,211,238,0.45)]">
-            <Shield className="h-4 w-4 text-white" />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold leading-none tracking-[0.22em] text-cyan-200">AI PLANNER</p>
-            <p className="mt-1 text-[9px] leading-none text-slate-400">Good morning, Rahul</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <motion.span
-            key={absorbed}
-            initial={{ scale: 0.6, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="flex items-center gap-1 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-1 text-[8px] font-semibold text-cyan-300"
-          >
-            <Brain className="h-2.5 w-2.5" />
-            Synced {absorbed} sources
-          </motion.span>
-          <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-[8px] font-semibold text-emerald-300">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
-            </span>
-            Live
-          </span>
-        </div>
+        />
       </div>
 
-      <div className="mt-4 grid grid-cols-12 gap-3">
-        <div className="col-span-7 space-y-3">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-            <div className="flex items-center justify-between">
-              <SectionTitle icon={CalendarCheck}>Today&apos;s Schedule</SectionTitle>
-              <span className="mb-2 text-[8px] font-semibold text-cyan-300">3 tasks</span>
-            </div>
-            <div className="space-y-1.5">
-              {TASKS.map((t) => (
-                <div
-                  key={t.title}
-                  className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1.5"
-                >
-                  <span className="w-12 shrink-0 text-[8px] font-semibold text-slate-500">{t.time}</span>
-                  <span className={`shrink-0 rounded border px-1 py-px text-[7px] font-semibold ${t.chip}`}>{t.sub}</span>
-                  <p className="min-w-0 flex-1 truncate text-[9px] font-medium text-slate-200">{t.title}</p>
-                  <span
-                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] text-[8px] ${
-                      t.done ? 'bg-emerald-400 text-slate-950' : 'border border-slate-500/50'
-                    }`}
-                  >
-                    {t.done ? '✓' : ''}
-                  </span>
-                </div>
-              ))}
+      <div className="relative p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <motion.div
+              className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-[0_0_18px_rgba(34,211,238,0.45)]"
+              animate={mounted && !reduced ? { rotate: [0, 5, -5, 0] } : {}}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Shield className="h-5 w-5 text-white" />
+            </motion.div>
+            <div>
+              <p className="text-[10px] font-bold leading-none tracking-[0.22em] text-cyan-200">
+                AI PLANNER
+              </p>
+              <p className="mt-0.5 text-[9px] leading-none text-slate-400">
+                Good morning, Rahul
+              </p>
             </div>
           </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-            <SectionTitle icon={Target} color="text-amber-300">
-              Smart Priorities
-            </SectionTitle>
-            <div className="space-y-2">
-              {PRIORITIES.map((p) => (
-                <div key={p.label}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p.dot, boxShadow: `0 0 6px ${p.dot}` }} />
-                      <p className="truncate text-[9px] font-semibold text-slate-100">{p.label}</p>
-                    </div>
-                    <span className="shrink-0 text-[7.5px] text-slate-500">{p.tag}</span>
-                  </div>
-                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      whileInView={{ width: `${p.pct}%` }}
-                      viewport={{ once: true }}
-                      transition={{ delay: 0.4, duration: 0.9, ease: 'easeOut' }}
-                      className={`h-full rounded-full bg-gradient-to-r ${p.bar}`}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="flex items-center gap-1.5">
+            <motion.span
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-cyan-400/25 bg-cyan-400/10 text-[7px] font-semibold text-cyan-300"
+              animate={mounted && !reduced ? { scale: [1, 1.1, 1] } : {}}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Brain className="h-2.5 w-2.5" />
+            </motion.span>
+            <span className="flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-[8px] font-semibold text-emerald-300">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
+              </span>
+              Live
+            </span>
           </div>
         </div>
 
-        <div className="col-span-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2.5">
-              <div className="flex items-center justify-between">
-                <p className="text-[8px] font-bold uppercase tracking-widest text-slate-400">Study Hours</p>
-                <Clock3 className="h-3 w-3 text-cyan-300" />
+        <div className="mt-4 space-y-3.5">
+          {/* Today's Schedule */}
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <CalendarCheck className="h-3 w-3 text-cyan-300" />
+                <span className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+                  Today&apos;s Schedule
+                </span>
               </div>
-              <p className="mt-1 text-lg font-bold leading-none text-white">
-                4h <span className="text-xs font-medium text-slate-400">30m</span>
-              </p>
-              <div className="mt-1.5 flex h-6 items-end gap-[3px]">
-                {WEEK_BARS.map((v, i) => (
-                  <motion.span
-                    key={i}
-                    initial={{ scaleY: 0 }}
-                    whileInView={{ scaleY: 1 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: 0.3 + i * 0.05, duration: 0.5, ease: 'easeOut' }}
-                    className="flex-1 origin-bottom rounded-[2px] bg-gradient-to-t from-blue-500/70 to-cyan-300/90"
-                    style={{ height: `${v}%` }}
-                  />
-                ))}
-              </div>
+              <span className="text-[8px] font-semibold text-cyan-300">
+                3 tasks
+              </span>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2.5">
-              <div className="flex items-center justify-between">
-                <p className="text-[8px] font-bold uppercase tracking-widest text-slate-400">Productivity</p>
-                <Gauge className="h-3 w-3 text-violet-300" />
+            <div className="space-y-1.5">
+              {SCHEDULE_TASKS.map((task) => (
+                <motion.div
+                  key={task.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: 0.05 * SCHEDULE_TASKS.indexOf(task) }}
+                  className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-2 py-1.5"
+                >
+                  <span className="w-12 shrink-0 text-[8px] font-semibold text-slate-500">
+                    {task.time}
+                  </span>
+                  <SubjectChip subject={task.subject} />
+                  <p className="min-w-0 flex-1 truncate text-[9px] font-medium text-slate-200">
+                    {task.title}
+                  </p>
+                  <motion.span
+                    initial={{ scale: task.done ? 1 : 0.8, opacity: task.done ? 1 : 0 }}
+                    animate={{ scale: task.done ? 1 : 0.8, opacity: task.done ? 1 : 0 }}
+                    transition={{ duration: 0.2, delay: 0.1 * SCHEDULE_TASKS.indexOf(task) }}
+                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] text-[8px] ${
+                      task.done
+                        ? "bg-emerald-400 text-slate-950"
+                        : "border border-slate-500/50"
+                    }`}
+                  >
+                    {task.done ? "✓" : ""}
+                  </motion.span>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Subject Cards */}
+          <div className="space-y-2.5">
+            <p className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+              Subject Focus
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {SUBJECT_CARDS.map((card, i) => (
+                <motion.div
+                  key={card.id}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{
+                    duration: 0.3,
+                    delay: 0.05 * i,
+                    ease: [0.65, 0, 0.35, 1],
+                  }}
+                  className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]"
+                >
+                  <div className="p-2">
+                    <div className="mb-1 flex items-center justify-between">
+                      {card.icon}
+                      <span className="text-[8px] font-bold text-slate-400">
+                        {card.progress}%
+                      </span>
+                    </div>
+                    <p className="text-[9px] font-semibold text-slate-100">
+                      {card.name}
+                    </p>
+                  </div>
+                  <motion.div
+                    className="absolute bottom-0 left-0 h-0.5 rounded-b-xl"
+                    style={{
+                      background: `linear-gradient(to right, ${
+                        card.color.split(" ")[0]
+                      }, ${card.color.split(" ")[2]})`,
+                    }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${card.progress}%` }}
+                    transition={{ duration: 0.8, delay: 0.2 + i * 0.1, ease: "easeOut" }}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Focus Score */}
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Brain className="h-3 w-3 text-violet-300" />
+                <span className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+                  Focus Score
+                </span>
               </div>
-              <p className="mt-1 text-lg font-bold leading-none text-white">92</p>
-              <span className="mt-0.5 flex items-center gap-0.5 text-[8px] font-semibold text-emerald-400">
-                <TrendingUp className="h-2 w-2" /> +9% this week
+              <motion.span
+                className="text-lg font-bold text-white"
+                animate={mounted && !reduced ? { opacity: [0.5, 1, 0.5] } : {}}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              >
+                87
+              </motion.span>
+            </div>
+            <div className="mb-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <motion.div
+                className="h-full w-[73%] rounded-full bg-gradient-to-r from-violet-400 via-cyan-300 to-emerald-300"
+                initial={{ width: 0 }}
+                animate={{ width: "73%" }}
+                transition={{ duration: 1, delay: 0.3, ease: "easeOut" }}
+              />
+            </div>
+            <p className="text-[7.5px] text-slate-500">
+              Your AI adapts the schedule based on real-time focus patterns
+            </p>
+          </div>
+
+          {/* Backlog Reduction */}
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <RotateCw className="h-3 w-3 text-rose-300" />
+                <span className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+                  Backlog Reduction
+                </span>
+              </div>
+              <span className="text-[8px] font-bold text-emerald-300">-42%</span>
+            </div>
+            <div className="flex items-end gap-1.5">
+              <span className="text-xs font-bold text-white">12/19</span>
+              <span className="text-[7.5px] text-slate-500">chapters cleared</span>
+            </div>
+            <motion.div
+              className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              <motion.div
+                className="h-full w-[63%] rounded-full bg-gradient-to-r from-emerald-400 to-teal-500"
+                initial={{ width: 0 }}
+                animate={{ width: "63%" }}
+                transition={{ duration: 0.9, delay: 0.45, ease: "easeOut" }}
+              />
+            </motion.div>
+            <div className="mt-1.5 flex items-center gap-1">
+              <TrendingUp className="h-2.5 w-2.5 text-emerald-400" />
+              <span className="text-[7.5px] font-semibold text-emerald-300">
+                5 topics cleared this week
               </span>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2.5">
-            <div className="flex items-center justify-between">
-              <SectionTitle icon={Layers}>Backlog Progress</SectionTitle>
-              <span className="mb-2 text-[9px] font-bold text-cyan-300">64%</span>
-            </div>
-            <div className="h-1 overflow-hidden rounded-full bg-white/10">
-              <motion.div
-                initial={{ width: 0 }}
-                whileInView={{ width: '64%' }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.35, duration: 0.9, ease: 'easeOut' }}
-                className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
-              />
-            </div>
-            <p className="mt-1.5 text-[7.5px] text-slate-500">12 of 19 chapters cleared</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2.5">
-              <div className="flex items-center justify-between">
-                <p className="text-[8px] font-bold uppercase tracking-widest text-slate-400">Weekly Goal</p>
-                <Trophy className="h-3 w-3 text-amber-300" />
+          {/* Weekly Progress */}
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Clock3 className="h-3 w-3 text-blue-300" />
+                <span className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+                  Weekly Progress
+                </span>
               </div>
-              <div className="mt-1.5 flex items-center gap-2">
-                <svg viewBox="0 0 36 36" className="h-10 w-10 -rotate-90">
-                  <defs>
-                    <linearGradient id="goalGrad">
-                      <stop offset="0%" stopColor="#22d3ee" />
-                      <stop offset="100%" stopColor="#a78bfa" />
-                    </linearGradient>
-                  </defs>
-                  <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3.5" />
-                  <motion.circle
-                    cx="18"
-                    cy="18"
-                    r="14"
-                    fill="none"
-                    stroke="url(#goalGrad)"
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 14}
-                    initial={{ strokeDashoffset: 2 * Math.PI * 14 }}
-                    whileInView={{ strokeDashoffset: 2 * Math.PI * 14 * (1 - 0.72) }}
-                    viewport={{ once: true }}
-                    transition={{ delay: 0.4, duration: 1.1, ease: 'easeOut' }}
-                  />
-                </svg>
-                <div>
-                  <p className="text-[11px] font-bold leading-none text-white">5/7</p>
-                  <p className="mt-0.5 text-[7.5px] text-slate-500">chapters done</p>
-                </div>
-              </div>
+              <span className="text-xs font-bold text-white">4h 30m</span>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2.5">
-              <SectionTitle icon={RotateCcw} color="text-teal-300">
-                Revision
-              </SectionTitle>
-              <div className="space-y-1">
-                {REVISION.map((r) => (
-                  <div key={r.label} className="flex items-center justify-between gap-1">
-                    <p className="flex min-w-0 items-center gap-1 text-[8px] font-medium text-slate-200">
-                      {r.hot && (
-                        <span className="h-1 w-1 shrink-0 rounded-full bg-rose-400 shadow-[0_0_5px_rgba(251,113,133,0.9)]" />
-                      )}
-                      <span className="truncate">{r.label}</span>
-                    </p>
-                    <span className="shrink-0 text-[7px] text-slate-500">{r.due}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="flex h-6 items-end gap-[2px]">
+              {WEEK_PROGRESS.map((v, i) => (
+                <motion.span
+                  key={i}
+                  initial={{ scaleY: 0, opacity: 0 }}
+                  animate={{ scaleY: 1, opacity: 1 }}
+                  transition={{
+                    delay: 0.2 + i * 0.04,
+                    duration: 0.5,
+                    ease: "easeOut",
+                  }}
+                  className="relative flex-1 origin-bottom rounded-[2px] bg-gradient-to-t from-blue-500/70 to-cyan-300/90"
+                  style={{ height: `${v}%` }}
+                />
+              ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-cyan-400/25 bg-gradient-to-r from-cyan-400/10 via-blue-500/10 to-violet-500/10 p-2.5">
+          {/* AI Suggestion */}
+          <motion.div
+            className="rounded-2xl border border-cyan-400/25 bg-gradient-to-r from-cyan-400/10 via-blue-500/10 to-violet-500/10 p-3"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.5, ease: EASE_OPEN }}
+          >
             <div className="flex items-start gap-1.5">
-              <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-cyan-300" />
+              <motion.div
+                animate={mounted && !reduced ? { rotate: [0, 10, -10, 0] } : {}}
+                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />
+              </motion.div>
               <div>
-                <p className="text-[7.5px] font-bold uppercase tracking-widest text-cyan-200">AI Suggestion</p>
-                <p className="mt-0.5 leading-relaxed text-[8px] text-slate-300">{SUGGESTION}</p>
+                <p className="text-[7.5px] font-bold uppercase tracking-widest text-cyan-200">
+                  AI Adaptation
+                </p>
+                <p className="mt-0.5 leading-relaxed text-[8px] text-slate-300">
+                  {AI_SUGGESTION}
+                </p>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+}
 
-export default function AIPlannerShowcase() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const scaleRef = useRef<HTMLDivElement>(null);
-  const burstId = useRef(0);
-  const pruneTimers = useRef<number[]>([]);
-
-  const inView = useInView(sectionRef, { once: false, margin: '-12% 0px -12% 0px' });
+function MobilePlannerScreen() {
   const reduced = useReducedMotion();
-  const active = inView && !reduced;
+  const mounted = useMounted();
 
-  const [scale, setScale] = useState(0.85);
-  const [absorbed, setAbsorbed] = useState(0);
-  const [bursts, setBursts] = useState<BurstData[]>([]);
+  const progressColors = [
+    "from-cyan-400 to-blue-500",
+    "from-emerald-400 to-teal-500",
+    "from-violet-400 to-purple-500",
+    "from-orange-400 to-rose-500",
+  ];
 
-  const mx = useMotionValue(0);
-  const my = useMotionValue(0);
-  const sx = useSpring(mx, { stiffness: 55, damping: 18 });
-  const sy = useSpring(my, { stiffness: 55, damping: 18 });
-  const rotY = useTransform(sx, [-0.5, 0.5], [-7, 7]);
-  const rotX = useTransform(sy, [-0.5, 0.5], [7, -7]);
-  const glowX = useTransform(sx, [-0.5, 0.5], [-14, 14]);
-  const glowY = useTransform(sy, [-0.5, 0.5], [12, -12]);
+  return (
+    <div
+      className="relative h-full w-full overflow-y-auto"
+      style={{
+        background: "linear-gradient(180deg, #030512 0%, #081233 45%, #0a0a0f 100%)",
+      }}
+    >
+      <div className="p-3.5">
+        {/* Header */}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <motion.div
+              className="flex h-7 w-7 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600"
+              animate={mounted && !reduced ? { rotate: [0, 6, -6, 0] } : {}}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Shield className="h-4 w-4 text-white" />
+            </motion.div>
+            <div>
+              <p className="text-[8px] font-bold leading-none tracking-[0.18em] text-cyan-200">
+                AI PLANNER
+              </p>
+              <p className="mt-0.5 text-[7px] leading-none text-slate-500">
+                Today&apos;s Plan
+              </p>
+            </div>
+          </div>
+          <motion.span
+            className="flex h-4 w-4 items-center justify-center rounded-full border border-cyan-400/25 bg-cyan-400/10 text-[6px] text-cyan-300"
+            animate={mounted && !reduced ? { scale: [1, 1.15, 1] } : {}}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <Brain className="h-2.5 w-2.5" />
+          </motion.span>
+        </div>
 
-  useLayoutEffect(() => {
-    const el = scaleRef.current;
-    if (!el) return;
-    const update = () => setScale(Math.min(1, Math.max(0.62, el.getBoundingClientRect().width / SCENE_W)));
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+        {/* Schedule List */}
+        <div className="mb-4 space-y-2.5">
+          <p className="text-[7px] font-bold uppercase tracking-widest text-slate-500">
+            Today&apos;s AI Plan
+          </p>
+          {MOBILE_SCHEDULE_TASKS.map((task, i) => (
+            <motion.div
+              key={task.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.25, delay: 0.05 * i }}
+              className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5"
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-100">
+                  {task.time}
+                </span>
+                <span className="text-[7px] font-medium text-slate-400">
+                  {task.title}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <motion.div
+                  className={`h-full rounded-full bg-gradient-to-r ${progressColors[i % progressColors.length]}`}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${task.progress}%` }}
+                  transition={{
+                    duration: 0.8,
+                    delay: 0.1 + i * 0.05,
+                    ease: "easeOut",
+                  }}
+                />
+              </div>
+            </motion.div>
+          ))}
+        </div>
 
-  useEffect(() => () => pruneTimers.current.forEach((t) => window.clearTimeout(t)), []);
+        {/* Focus Score & Backlog */}
+        <div className="mb-4 space-y-3">
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[7px] font-bold uppercase tracking-widest text-slate-500">
+                <Brain className="h-3 w-3 text-violet-300" />
+                Focus Score
+              </span>
+              <motion.span
+                className="text-base font-bold text-white"
+                animate={mounted && !reduced ? { opacity: [0.5, 1, 0.5] } : {}}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              >
+                94%
+              </motion.span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <motion.div
+                className="h-full w-[94%] rounded-full bg-gradient-to-r from-violet-400 via-cyan-300 to-emerald-300"
+                initial={{ width: 0 }}
+                animate={{ width: "94%" }}
+                transition={{ duration: 1, delay: 0.3, ease: "easeOut" }}
+              />
+            </div>
+          </div>
 
-  const onAbsorb = useCallback((id: string) => {
-    const item = ORBIT_ITEMS.find((o) => o.id === id);
-    setAbsorbed((c) => c + 1);
-    setBursts((prev) => [...prev, { id: burstId.current++, color: item?.color ?? '#22d3ee' }]);
-    pruneTimers.current.push(
-      window.setTimeout(() => setBursts((prev) => prev.filter((b) => b.id !== burstId.current - 1)), 1300),
-    );
-  }, []);
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[7px] font-bold uppercase tracking-widest text-slate-500">
+                <TrendingUp className="h-3 w-3 text-emerald-300" />
+                Backlog
+              </span>
+              <span className="text-xs font-bold text-emerald-300">↓ 18%</span>
+            </div>
+            <div className="flex items-end gap-1">
+              <span className="text-xs font-bold text-white">15/19</span>
+              <span className="text-[7px] text-slate-500">chapters cleared</span>
+            </div>
+            <motion.div
+              className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              <motion.div
+                className="h-full w-[79%] rounded-full bg-gradient-to-r from-emerald-400 to-teal-500"
+                initial={{ width: 0 }}
+                animate={{ width: "79%" }}
+                transition={{ duration: 0.9, delay: 0.45, ease: "easeOut" }}
+              />
+            </motion.div>
+          </div>
+        </div>
 
-  const handleMouse = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    mx.set((e.clientX - rect.left) / rect.width - 0.5);
-    my.set((e.clientY - rect.top) / rect.height - 0.5);
+        {/* AI Status */}
+        <div className="rounded-lg border border-cyan-400/25 bg-gradient-to-r from-cyan-400/10 via-blue-500/10 to-violet-500/10 p-2.5">
+          <div className="flex items-center gap-2">
+            <motion.div
+              animate={mounted && !reduced ? { rotate: [0, 12, -12, 0] } : {}}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+            </motion.div>
+            <div>
+              <p className="text-[7px] font-bold uppercase tracking-widest text-cyan-200">
+                AI Status
+              </p>
+              <p className="text-[8px] text-slate-300">
+                <span className="text-emerald-300">✓</span> Plan optimized
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent pointer-events-none" />
+      </div>
+    </div>
+  );
+}
+
+function MobilePhoneMockup() {
+  const reduced = useReducedMotion();
+  const [mouseX, setMouseX] = useState(0);
+  const [mouseY, setMouseY] = useState(0);
+  const phoneRef = useRef<HTMLDivElement>(null);
+  const mounted = useMounted();
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!phoneRef.current || reduced) return;
+    const rect = phoneRef.current.getBoundingClientRect();
+    setMouseX((e.clientX - rect.left) / rect.width - 0.5);
+    setMouseY((e.clientY - rect.top) / rect.height - 0.5);
   };
 
   const resetMouse = () => {
-    mx.set(0);
-    my.set(0);
+    setMouseX(0);
+    setMouseY(0);
   };
 
-  const bgParticles = useMemo(
-    () =>
-      Array.from({ length: 26 }, (_, i) => ({
-        id: i,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: 1.5 + Math.random() * 2.5,
-        dur: 10 + Math.random() * 16,
-        delay: Math.random() * 10,
-        opacity: 0.15 + Math.random() * 0.3,
-        drift: (Math.random() - 0.5) * 34,
-      })),
-    [],
+  const rotX = mouseY * 6;
+  const rotY = mouseX * -6;
+
+  return (
+    <div
+      ref={phoneRef}
+      className="relative flex justify-center"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={resetMouse}
+    >
+      <motion.div
+        className="relative"
+        style={{
+          perspective: "1000px",
+          transformStyle: "preserve-3d",
+        }}
+        animate={mounted && !reduced ? { rotateX: rotX, rotateY: rotY } : {}}
+        transition={{ type: "spring", stiffness: 250, damping: 30 }}
+      >
+        <div className="relative mx-auto">
+          {/* Phone body */}
+          <div className="relative h-[680px] w-[330px] max-w-[82vw] rounded-[44px] border-8 border-[#1a1a21] bg-[#0a0a0b] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6)]">
+            {/* Phone inner glow */}
+            <div className="absolute inset-0 rounded-[36px] bg-gradient-to-b from-white/[0.04] to-transparent" />
+
+            {/* Camera bump / notch */}
+            <div className="absolute top-5 left-1/2 -translate-x-1/2 flex items-end gap-2">
+              <span className="block h-1 w-7 rounded-full bg-[#121216]" />
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/40 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-cyan-300" />
+              </span>
+              <span className="block h-1 w-7 rounded-full bg-[#121216]" />
+            </div>
+
+            {/* Screen / display area */}
+            <div className="absolute inset-4 top-[38px] overflow-hidden rounded-[34px]">
+              <div className="relative h-full w-full">
+                <MobilePlannerScreen />
+              </div>
+            </div>
+
+            {/* Screen reflection highlight */}
+            <div
+              className="absolute inset-0 rounded-[40px] pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.04), transparent 60%)",
+              }}
+            />
+          </div>
+
+          {/* Phone drop shadow */}
+          <motion.div
+            className="absolute -bottom-8 left-1/2 -translate-x-1/2 h-12 w-44 rounded-full bg-black/30 blur-2xl"
+            animate={mounted && !reduced ? { opacity: [0.3, 0.45, 0.3] } : {}}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          />
+        </div>
+      </motion.div>
+
+      {/* Floating badges around the phone */}
+      <div className="absolute -top-8 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 px-4 sm:gap-3 sm:px-0">
+        {(reduced ? FEATURE_BADGES.slice(0, 2) : FEATURE_BADGES).map((badge, i) => (
+          <motion.div
+            key={badge.label}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 + i * 0.1, duration: 0.4 }}
+            className={`flex items-center gap-1.5 rounded-full border border-${badge.color}-400/25 bg-${badge.color}-400/10 px-3 py-1 text-[8px] font-medium text-${badge.color}-300 backdrop-blur-md`}
+          >
+            {badge.icon}
+            {badge.label}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DesktopDashboard() {
+  const reduced = useReducedMotion();
+  const [orbs] = useState(() =>
+    Array.from({ length: 6 }).map(() => ({
+      size: 2 + Math.random() * 2,
+      left: 20 + Math.random() * 60,
+      top: 10 + Math.random() * 80,
+      duration: 3 + Math.random() * 2,
+      delay: Math.random() * 3,
+    })),
+  );
+  const mounted = useMounted();
+
+  const floatAnim = !mounted || reduced
+    ? {}
+    : { y: [0, -8, 0] };
+  const floatTrans = !mounted || reduced
+    ? { duration: 0 }
+    : { duration: 6, repeat: Infinity, repeatType: "mirror" as const, ease: "easeInOut" };
+
+  return (
+    <motion.div
+      className="relative"
+      style={{ perspective: "1400px" }}
+      initial={{ opacity: 0, y: 40 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-80px" }}
+      transition={{ duration: 0.9, ease: EASE_OPEN }}
+    >
+      {/* AI glow halo */}
+      {!reduced && mounted && (
+        <motion.div
+          className="absolute -inset-16 rounded-full blur-[80px]"
+          style={{
+            background:
+              "conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.1) 60deg, transparent 120deg, transparent 240deg, rgba(167,139,250,0.08) 300deg, transparent 360deg)",
+            zIndex: 0,
+          }}
+          animate={{ rotate: 360 }}
+          transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
+        />
+      )}
+
+      {/* Floating feature chips */}
+      <div className="absolute -top-8 left-1/2 flex -translate-x-1/2 gap-2.5 z-20">
+        {[
+          { label: "AI-Generated", icon: <Brain className="h-2.5 w-2.5" />, color: "cyan" },
+          { label: "Live Sync", icon: <RotateCw className="h-2.5 w-2.5" />, color: "emerald" },
+          { label: "Real-time Focus", icon: <Gauge className="h-2.5 w-2.5" />, color: "violet" },
+        ].map((chip, i) => (
+          <motion.div
+            key={chip.label}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 + i * 0.08, duration: 0.4 }}
+            className={`flex items-center gap-1 rounded-full border border-${chip.color}-400/25 bg-${chip.color}-400/10 px-3 py-1.5 text-[9px] font-medium text-${chip.color}-300 backdrop-blur-md`}
+          >
+            {chip.icon}
+            {chip.label}
+          </motion.div>
+        ))}
+      </div>
+
+      <motion.div
+        className="relative z-10 mx-auto"
+        style={{
+          transformStyle: "preserve-3d",
+          transform: !reduced && mounted ? "rotateX(8deg)" : "none",
+        }}
+        animate={floatAnim}
+        transition={floatTrans}
+      >
+        {/* Glassmorphism card backface */}
+        <div
+          className="absolute -inset-1 rounded-[32px] border border-white/5 bg-white/[0.02] shadow-[0_30px_100px_-20px_rgba(2,6,23,0.9)] backdrop-blur-3xl"
+          style={{
+            transform: "translateZ(-40px)",
+            opacity: 0.4,
+          }}
+        />
+
+        <div className="relative rounded-[28px] border border-white/12 bg-white/[0.045] shadow-[0_30px_100px_-20px_rgba(2,6,23,0.9),0_0_60px_rgba(56,189,248,0.15)] backdrop-blur-2xl">
+          <div className="absolute inset-0">
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent" />
+            <div className="absolute -left-32 -top-32 h-64 w-64 rounded-full bg-blue-600/25 blur-3xl" />
+            <div className="absolute -bottom-40 -right-32 h-72 w-72 rounded-full bg-purple-600/20 blur-3xl" />
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background:
+                  "radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,0.06), transparent 55%)",
+              }}
+            />
+          </div>
+
+          <div className="relative p-6">
+            <PlannerCard />
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Floating particles around the card */}
+      {!reduced &&
+        orbs.map((o, i) => (
+          <motion.div
+            key={i}
+            className="absolute z-0 rounded-full bg-cyan-300/30"
+            style={{
+              width: `${o.size}px`,
+              height: `${o.size}px`,
+              left: `${o.left}%`,
+              top: `${o.top}%`,
+              filter: "blur(0.5px)",
+            }}
+            animate={{
+              y: [0, -20, 0],
+              opacity: [0, 0.5, 0],
+              scale: [1, 1.4, 1],
+            }}
+            transition={{
+              duration: o.duration,
+              repeat: Infinity,
+              delay: o.delay,
+              ease: "easeInOut",
+            }}
+          />
+        ))}
+    </motion.div>
+  );
+}
+
+export default function AIPlannerShowcase() {
+  const reduced = useReducedMotion();
+  const [isMobile, setIsMobile] = useState(false);
+  const [bgParticles] = useState(() =>
+    Array.from({ length: 40 }).map(() => ({
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: 1 + Math.random() * 2.5,
+      duration: 10 + Math.random() * 16,
+      delay: Math.random() * 10,
+      opacity: 0.15 + Math.random() * 0.3,
+      driftX: (Math.random() - 0.5) * 30,
+    })),
   );
 
-  const sparkDots = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, i) => ({
-        id: i,
-        x: 150 + Math.random() * 680,
-        y: 120 + Math.random() * 540,
-        size: 1 + Math.random() * 2,
-        dur: 3 + Math.random() * 4,
-        delay: Math.random() * 3,
-      })),
-    [],
-  );
-
-  const scrollToHow = () => {
-    document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  useLayoutEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   return (
     <section
       id="showcase"
-      ref={sectionRef}
-      className="relative scroll-mt-24 overflow-hidden"
-      style={{ background: 'linear-gradient(180deg, #030512 0%, #081233 45%, #0b1023 100%)' }}
+      className="relative scroll-mt-24 overflow-hidden py-16 md:py-24"
+      style={{
+        background: "linear-gradient(180deg, #030512 0%, #081233 45%, #0b1023 100%)",
+      }}
     >
       {/* ===== Background ===== */}
       <div className="pointer-events-none absolute inset-0" aria-hidden>
@@ -668,29 +840,34 @@ export default function AIPlannerShowcase() {
           className="absolute inset-0"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(148,163,184,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.055) 1px, transparent 1px)',
-            backgroundSize: '52px 52px',
-            maskImage: 'radial-gradient(ellipse at center, black 10%, transparent 72%)',
-            WebkitMaskImage: 'radial-gradient(ellipse at center, black 10%, transparent 72%)',
+              "linear-gradient(rgba(148,163,184,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.055) 1px, transparent 1px)",
+            backgroundSize: "52px 52px",
+            maskImage: "radial-gradient(ellipse at center, black 10%, transparent 72%)",
+            WebkitMaskImage:
+              "radial-gradient(ellipse at center, black 10%, transparent 72%)",
           }}
         >
           <motion.div
             className="absolute -inset-y-24 inset-x-0"
-            style={{ backgroundImage: 'linear-gradient(0deg, transparent, rgba(56,189,248,0.06))', backgroundSize: '52px 52px' }}
-            animate={{ y: [0, 52, 0] }}
-            transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
+            style={{
+              backgroundImage:
+                "linear-gradient(0deg, transparent, rgba(56,189,248,0.06))",
+              backgroundSize: "52px 52px",
+            }}
+            animate={!reduced ? { y: [0, 52, 0] } : {}}
+            transition={{ duration: 22, repeat: Infinity, ease: "linear" }}
           />
         </div>
 
         <motion.div
-          className="absolute left-[50%] top-1/2 h-[120%] w-[130%] -translate-x-1/2 -translate-y-1/2"
+          className="absolute left-[50%] top-1/2 h-[130%] w-[140%] -translate-x-1/2 -translate-y-1/2"
           style={{
             background:
-              'conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.05) 16deg, transparent 34deg, transparent 170deg, rgba(124,58,237,0.05) 196deg, transparent 218deg)',
-            filter: 'blur(44px)',
+              "conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.05) 16deg, transparent 34deg, transparent 170deg, rgba(124,58,237,0.05) 196deg, transparent 218deg)",
+            filter: "blur(44px)",
           }}
-          animate={active ? { rotate: 360 } : {}}
-          transition={{ duration: 64, repeat: Infinity, ease: 'linear' }}
+          animate={!reduced ? { rotate: 360 } : {}}
+          transition={{ duration: 64, repeat: Infinity, ease: "linear" }}
         />
 
         <div className="absolute -left-32 top-20 h-96 w-96 rounded-full bg-blue-600/20 blur-[130px]" />
@@ -700,51 +877,98 @@ export default function AIPlannerShowcase() {
         <motion.div
           className="absolute left-[8%] right-[8%] top-[16%] h-px"
           style={{
-            background: 'linear-gradient(90deg, transparent, rgba(34,211,238,0.4), transparent)',
-            boxShadow: '0 0 14px rgba(34,211,238,0.3)',
+            background:
+              "linear-gradient(90deg, transparent, rgba(34,211,238,0.4), transparent)",
+            boxShadow: "0 0 14px rgba(34,211,238,0.3)",
           }}
-          animate={active ? { opacity: [0.12, 0.6, 0.12], scaleX: [1, 1.06, 1] } : { opacity: 0.12 }}
-          transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+          animate={
+            !reduced
+              ? { opacity: [0.12, 0.6, 0.12], scaleX: [1, 1.06, 1] }
+              : { opacity: 0.12 }
+          }
+          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
         />
         <motion.div
           className="absolute bottom-[24%] right-[9%] h-24 w-px"
-          style={{ background: 'linear-gradient(180deg, transparent, rgba(59,130,246,0.35), transparent)', boxShadow: '0 0 12px rgba(59,130,246,0.3)' }}
-          animate={active ? { opacity: [0.12, 0.5, 0.12] } : { opacity: 0.12 }}
-          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+          style={{
+            background:
+              "linear-gradient(180deg, transparent, rgba(59,130,246,0.35), transparent)",
+            boxShadow: "0 0 12px rgba(59,130,246,0.3)",
+          }}
+          animate={
+            !reduced ? { opacity: [0.12, 0.5, 0.12] } : { opacity: 0.12 }
+          }
+          transition={{
+            duration: 6,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 1,
+          }}
         />
         <motion.div
           className="absolute bottom-[30%] left-[8%] h-20 w-px"
-          style={{ background: 'linear-gradient(180deg, transparent, rgba(34,211,238,0.3), transparent)', boxShadow: '0 0 10px rgba(34,211,238,0.25)' }}
-          animate={active ? { opacity: [0.12, 0.45, 0.12] } : { opacity: 0.12 }}
-          transition={{ duration: 5.5, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
+          style={{
+            background:
+              "linear-gradient(180deg, transparent, rgba(34,211,238,0.3), transparent)",
+            boxShadow: "0 0 10px rgba(34,211,238,0.25)",
+          }}
+          animate={
+            !reduced ? { opacity: [0.12, 0.45, 0.12] } : { opacity: 0.12 }
+          }
+          transition={{
+            duration: 5.5,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 2,
+          }}
         />
 
-        {bgParticles.map((p) => (
-          <motion.span
-            key={p.id}
-            className="absolute rounded-full bg-cyan-300/60"
-            style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.size, height: p.size, filter: 'blur(1px)' }}
-            animate={active ? { y: [-20, -180], x: [0, p.drift], opacity: [0, p.opacity, 0] } : { opacity: 0 }}
-            transition={{ duration: p.dur, delay: p.delay, repeat: Infinity, ease: 'linear' }}
-          />
-        ))}
+        {/* Background particles */}
+        {!reduced &&
+          bgParticles.map((p, i) => (
+            <motion.span
+              key={`bg-particle-${i}`}
+              className="absolute rounded-full bg-cyan-300/60"
+              style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.size, height: p.size, filter: "blur(0.5px)" }}
+              animate={{
+                y: [0, -30, 0],
+                x: [0, p.driftX],
+                opacity: [0, p.opacity, 0],
+              }}
+              transition={{
+                duration: p.duration,
+                delay: p.delay,
+                repeat: Infinity,
+                ease: "linear",
+              }}
+            />
+          ))}
 
         <div
           className="absolute inset-0"
-          style={{ background: 'radial-gradient(ellipse at center, transparent 35%, rgba(2,4,12,0.65) 100%)' }}
+          style={{
+            background:
+              "radial-gradient(ellipse at center, transparent 35%, rgba(2,4,12,0.65) 100%)",
+          }}
         />
         <div
           className="absolute inset-0"
-          style={{ backgroundImage: GRAIN, backgroundSize: '160px 160px', opacity: 0.045, mixBlendMode: 'overlay' }}
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/20000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E\")",
+            backgroundSize: "160px 160px",
+            opacity: 0.045,
+            mixBlendMode: "overlay",
+          }}
         />
       </div>
 
       {/* ===== Content ===== */}
-      <div className="relative mx-auto max-w-7xl px-6 pb-24 pt-24 sm:pb-28 sm:pt-28">
+      <div className="relative mx-auto max-w-7xl px-4 pb-20 pt-20 sm:px-6 sm:pb-24 sm:pt-24">
         <motion.div
           initial={{ opacity: 0, y: 26 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-80px' }}
+          viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.7, ease: EASE_OPEN }}
           className="mx-auto mb-10 flex max-w-3xl flex-col items-center gap-5 text-center"
         >
@@ -757,12 +981,12 @@ export default function AIPlannerShowcase() {
           </div>
 
           <h2 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
-            Your AI{' '}
+            Your AI{" "}
             <motion.span
               className="bg-gradient-to-r from-cyan-300 via-blue-400 to-violet-500 bg-clip-text text-transparent"
-              style={{ backgroundSize: '220% 100%' }}
-              animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-              transition={{ duration: 9, repeat: Infinity, ease: 'linear' }}
+              style={{ backgroundSize: "220% 100%" }}
+              animate={!reduced ? { backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] } : {}}
+              transition={{ duration: 9, repeat: Infinity, ease: "linear" }}
             >
               Study Partner
             </motion.span>
@@ -775,27 +999,33 @@ export default function AIPlannerShowcase() {
 
           <div className="mt-2 flex w-full flex-col items-center justify-center gap-3 sm:w-auto sm:flex-row sm:gap-4">
             <motion.div
-              animate={{
-                boxShadow: [
-                  '0 0 30px rgba(56,189,248,0.25)',
-                  '0 0 55px rgba(139,92,246,0.4)',
-                  '0 0 30px rgba(56,189,248,0.25)',
-                ],
-              }}
-              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+              animate={
+                !reduced
+                  ? {
+                      boxShadow: [
+                        "0 0 30px rgba(56,189,248,0.25)",
+                        "0 0 55px rgba(139,92,246,0.4)",
+                        "0 0 30px rgba(56,189,248,0.25)",
+                      ],
+                    }
+                  : {}
+              }
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               className="w-full rounded-full sm:w-auto"
             >
               <Link
                 to="/signup"
-                className="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-500 px-8 py-4 text-sm font-bold text-white transition hover:brightness-110 sm:w-auto"
+                className="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-500 px-8 py-4 text-sm font-bold text-white transition hover:brightness-110"
               >
                 <Sparkles className="h-4 w-4 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110" />
                 Generate My AI Plan
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                <Zap className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
             </motion.div>
             <button
-              onClick={scrollToHow}
+              onClick={() =>
+                document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
               className="group inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-8 py-4 text-sm font-semibold text-white backdrop-blur transition hover:border-cyan-400/40 hover:bg-white/10 sm:w-auto"
             >
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 transition group-hover:bg-cyan-400/20">
@@ -806,139 +1036,15 @@ export default function AIPlannerShowcase() {
           </div>
         </motion.div>
 
-        {/* ===== Scene ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 34 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-60px' }}
-          transition={{ duration: 0.9, ease: EASE_OPEN }}
-        >
-          <div ref={scaleRef} className="relative mx-auto w-full" style={{ height: SCENE_H * scale }}>
-            <div
-              className="relative mx-auto"
-              style={{ width: SCENE_W * scale, height: SCENE_H * scale }}
-              onMouseMove={handleMouse}
-              onMouseLeave={resetMouse}
-            >
-              <div
-                className="absolute left-0 top-0"
-                style={{ width: SCENE_W, height: SCENE_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-              >
-                {/* Neural network behind everything */}
-                <Suspense fallback={null}>
-                  <NeuralNetwork active={active} mouseX={sx} mouseY={sy} />
-                </Suspense>
-
-                {/* Flow beams */}
-                <FlowBeams active={active} />
-
-                {/* Orbit ring */}
-                <motion.div
-                  className="absolute rounded-[50%] border border-dashed border-cyan-400/20"
-                  style={{ left: CX, top: CY, width: RX * 2, height: RY * 2, x: '-50%', y: '-50%' }}
-                  animate={active ? { rotate: 360, opacity: [0.4, 0.9, 0.4] } : { opacity: 0.3 }}
-                  transition={{
-                    rotate: { duration: 46, repeat: Infinity, ease: 'linear' },
-                    opacity: { duration: 7, repeat: Infinity, ease: 'easeInOut' },
-                  }}
-                />
-
-                {/* Central glow */}
-                <motion.div
-                  className="absolute z-[1] rounded-full"
-                  style={{
-                    left: CX,
-                    top: CY,
-                    width: 640,
-                    height: 640,
-                    x: '-50%',
-                    y: '-50%',
-                    background: 'radial-gradient(circle, rgba(56,189,248,0.18), rgba(99,102,241,0.09) 45%, transparent 70%)',
-                  }}
-                  animate={{ opacity: [0.7, 1, 0.7] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                />
-                <motion.div
-                  className="absolute z-[1] rounded-full"
-                  style={{
-                    left: CX,
-                    top: CY,
-                    width: 620,
-                    height: 620,
-                    x: '-50%',
-                    y: '-50%',
-                    background:
-                      'conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.12) 30deg, transparent 70deg, transparent 200deg, rgba(167,139,250,0.12) 240deg, transparent 290deg)',
-                    filter: 'blur(20px)',
-                  }}
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
-                />
-
-                {/* Spark dots near the planner */}
-                {active &&
-                  sparkDots.map((s) => (
-                    <motion.span
-                      key={s.id}
-                      className="absolute z-[2] rounded-full bg-cyan-300/70"
-                      style={{ left: s.x, top: s.y, width: s.size, height: s.size, filter: 'blur(0.5px)' }}
-                      animate={{ y: [0, -14, 0], opacity: [0.15, 0.9, 0.15], scale: [1, 1.4, 1] }}
-                      transition={{ duration: s.dur, delay: s.delay, repeat: Infinity, ease: 'easeInOut' }}
-                    />
-                  ))}
-
-                {/* Orbiting data cards */}
-                {reduced ? (
-                  ORBIT_ITEMS.map((item) => {
-                    const a = rad(item.angle);
-                    const Icon = item.icon;
-                    return (
-                      <div
-                        key={item.id}
-                        className="absolute z-20 -translate-x-1/2 -translate-y-1/2"
-                        style={{ left: CX + Math.cos(a) * RX * item.rf, top: CY + Math.sin(a) * RY * item.rf }}
-                      >
-                        <div
-                          className="flex items-center gap-1.5 rounded-xl border bg-white/[0.06] px-2.5 py-1.5 backdrop-blur-md"
-                          style={{ borderColor: `${item.color}40`, boxShadow: `0 6px 24px rgba(2,6,23,0.45), 0 0 16px ${item.color}2b` }}
-                        >
-                          <Icon className="h-3.5 w-3.5" style={{ color: item.color }} />
-                          <span className="text-[10px] font-semibold text-slate-100">{item.label}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <>
-                    {ORBIT_ITEMS.map((item) => (
-                      <OrbitCard key={item.id} item={item} active={active} onAbsorb={onAbsorb} />
-                    ))}
-                    <AbsorbBursts bursts={bursts} />
-                  </>
-                )}
-
-                {/* Planner */}
-                <motion.div
-                  className="absolute z-30 -translate-x-1/2 -translate-y-1/2"
-                  style={{
-                    left: CX,
-                    top: CY,
-                    width: 540,
-                    rotateX: reduced ? 0 : rotX,
-                    rotateY: reduced ? 0 : rotY,
-                    transformPerspective: 1300,
-                  }}
-                >
-                  <motion.div
-                    animate={active ? { y: [0, -10, 0] } : {}}
-                    transition={{ duration: 6, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut' }}
-                  >
-                    <PlannerPanel absorbed={absorbed} />
-                  </motion.div>
-                </motion.div>
-              </div>
-            </div>
-          </div>
+        {/* ===== 3D Showcase ===== */}
+      <motion.div
+        initial={{ opacity: 0, y: 34 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-60px" }}
+        transition={{ duration: 0.9, ease: EASE_OPEN }}
+        className="relative flex flex-col items-center justify-center gap-8 md:gap-12"
+      >
+        {isMobile ? <MobilePhoneMockup /> : <DesktopDashboard />}
         </motion.div>
       </div>
     </section>

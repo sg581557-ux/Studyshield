@@ -91,7 +91,6 @@ export function FavoritesSection({
   isFavorite,
   isRevised,
   onMarkRevised,
-  onAddToFrequentlyUsed,
 }: FavoritesSectionProps) {
   if (favorites.length === 0 && recentlyViewed.length === 0) return null;
 

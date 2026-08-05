@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookMarked, CheckCircle2, ChevronRight, PlayCircle, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -35,7 +35,7 @@ export default function ChapterProgressReminder() {
 
   const examFamily = useMemo(() => backlogExamFamily(profile?.target_exam ?? ""), [profile?.target_exam]);
 
-  async function loadRows(): Promise<SubjectRow[]> {
+  const loadRows = useCallback(async (): Promise<SubjectRow[]> => {
     if (!profile) return [];
     const subjects = await db.getSubjects(profile.target_exam ?? "").catch(() => [] as SyllabusSubject[]);
     const all = await Promise.all(subjects.map((s) => db.getChapters(s.id).catch(() => [] as SyllabusChapter[])));
@@ -63,7 +63,7 @@ export default function ChapterProgressReminder() {
       }
       return { subject: s, chapters: ordered, current, next };
     }).filter((r) => r.chapters.length > 0);
-  }
+  }, [profile, examFamily]);
 
   // Evaluate eligibility: cadence passed → show; fast-track (chapter ≥80% done
   // today) → show; re-check once a minute while hidden.
@@ -98,12 +98,12 @@ export default function ChapterProgressReminder() {
     void check();
     const iv = window.setInterval(check, 60_000);
     return () => { cancelled = true; window.clearInterval(iv); };
-  }, [profile?.onboarding_completed, phase, stateVersion]);
+  }, [profile?.onboarding_completed, phase, stateVersion, loadRows]);
 
   useEffect(() => {
     if (phase !== "update") return;
     void loadRows().then((r) => setRows(r));
-  }, [phase]);
+  }, [phase, loadRows]);
 
   function openUpdate() {
     stateRef.current = markReminderShown(stateRef.current);

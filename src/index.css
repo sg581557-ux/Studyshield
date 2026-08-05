@@ -20,12 +20,53 @@
   body { @apply bg-ink-950 text-slate-300 font-sans; }
   * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
 
+  /* ---- Accent palettes ----
+     The Tailwind `accent-*` colors are CSS variables (see tailwind.config.js),
+     so the accent color can change at runtime via <html data-accent="...">.
+     Default (no attribute) is the original blue palette. */
+  :root, html[data-accent="blue"] {
+    --accent-50: 238 249 255;  --accent-100: 217 241 255; --accent-200: 186 231 255;
+    --accent-300: 138 216 255; --accent-400: 91 196 255;  --accent-500: 56 177 255;
+    --accent-600: 29 150 245;  --accent-700: 22 120 216; --accent-800: 26 97 159;
+    --accent-900: 27 82 128;
+  }
+  html[data-accent="violet"] {
+    --accent-50: 245 243 255;  --accent-100: 237 233 254; --accent-200: 221 214 254;
+    --accent-300: 196 181 253; --accent-400: 167 139 250; --accent-500: 139 92 246;
+    --accent-600: 124 58 237;  --accent-700: 109 40 217; --accent-800: 91 33 182;
+    --accent-900: 76 29 149;
+  }
+  html[data-accent="emerald"] {
+    --accent-50: 236 253 245;  --accent-100: 209 250 229; --accent-200: 167 243 208;
+    --accent-300: 110 231 183; --accent-400: 52 211 153;  --accent-500: 16 185 129;
+    --accent-600: 5 150 105;   --accent-700: 4 120 87;   --accent-800: 6 95 70;
+    --accent-900: 6 78 59;
+  }
+  html[data-accent="rose"] {
+    --accent-50: 255 241 242;  --accent-100: 255 228 230; --accent-200: 254 205 211;
+    --accent-300: 253 164 175; --accent-400: 251 113 133; --accent-500: 244 63 94;
+    --accent-600: 225 29 72;   --accent-700: 190 18 60;   --accent-800: 159 18 57;
+    --accent-900: 136 19 55;
+  }
+  html[data-accent="amber"] {
+    --accent-50: 255 251 235;  --accent-100: 254 243 199; --accent-200: 253 230 138;
+    --accent-300: 252 211 77;  --accent-400: 251 191 36;  --accent-500: 245 158 11;
+    --accent-600: 217 119 6;   --accent-700: 180 83 9;    --accent-800: 146 64 14;
+    --accent-900: 120 53 15;
+  }
+
+
   /* ---- Light theme overrides ----
      The app is dark by default. When <html class="light"> is present,
      we override the core surfaces and text colors so the entire app
      switches to a light theme without touching every component. */
   html.light body { @apply bg-slate-100 text-slate-800; }
   html.light * { scrollbar-color: rgba(0,0,0,0.15) transparent; }
+
+  /* Native date/time pickers forced dark via Tailwind's [color-scheme:dark]
+     follow the theme: flip them to light so the picker popup doesn't render
+     with invisible dark-on-dark controls in light mode. */
+  html.light [class*="[color-scheme:dark]"] { color-scheme: light; }
 
   /* Dark theme class (explicit) — mirrors the default body styling. */
   html.dark body { @apply bg-ink-950 text-slate-300; }
@@ -80,6 +121,45 @@
     padding-right: 2.25rem;
   }
   .input-label { @apply block text-xs font-medium text-slate-500 mb-1.5; }
+
+  /* Glass surfaces — used by the FormulaVault card tree (GlassCard).
+     Translucent white card with a soft border + blur in dark mode,
+     solid white surface in light mode. */
+  .glass {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1rem;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .glass-hover {
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+  .glass-hover:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+  html.light .glass {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    backdrop-filter: none;
+  }
+  html.light .glass-hover:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+  }
+}
+
+/* Visible focus indicator for keyboard users. Inputs/selects have their
+   own focus rings (input-base, select-base) so they are excluded. */
+:focus-visible {
+  outline: 2px solid rgb(var(--accent-500));
+  outline-offset: 2px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
 }
 
 /* ============================================================
@@ -118,11 +198,113 @@ html.light .text-slate-400 { color: #475569; } /* slate-600 */
 html.light .text-slate-500 { color: #64748b; } /* slate-500 */
 html.light .text-slate-600 { color: #94a3b8; } /* slate-400 */
 
+/* Grey scale used by the FormulaVault component tree (ui/Input, ui/Badge…). */
+html.light .text-gray-200 { color: #1e293b; } /* slate-800 */
+html.light .text-gray-300 { color: #334155; } /* slate-700 */
+html.light .text-gray-400 { color: #475569; } /* slate-600 */
+html.light .text-gray-500 { color: #64748b; } /* slate-500 */
+html.light .text-gray-600 { color: #94a3b8; } /* slate-400 */
+
+/* Accent/status text that is too pale on white backgrounds. */
+html.light .text-accent-400 { color: rgb(var(--accent-700)); }
+html.light .text-accent-light { color: rgb(var(--accent-700)); }
+html.light .text-success-light { color: #15803d; }  /* green-700 */
+html.light .text-warning-light { color: #b45309; }  /* amber-700 */
+html.light .text-error-light { color: #b91c1c; }    /* red-700 */
+html.light .text-purple-light { color: #7e22ce; }   /* purple-700 */
+html.light .text-success-400 { color: #16a34a; }    /* green-600 */
+html.light .text-warning-400 { color: #b45309; }    /* amber-700 */
+html.light .text-danger-400 { color: #b91c1c; }     /* red-700 */
+html.light .text-red-400 { color: #dc2626; }        /* red-600 */
+html.light .text-green-400 { color: #15803d; }      /* green-700 */
+
+/* FormulaVault inputs use bg-base-800 (dark) — flip to a light surface. */
+html.light [class*="bg-base-800"] {
+  background-color: #f8fafc;
+  border-color: #e2e8f0;
+}
+
 html.light select,
 html.light option {
   @apply bg-white text-slate-800 border-slate-300;
 }
 html.light option:hover { @apply bg-slate-100 text-slate-800; }
+
+/* Chat bubbles: the assistant bubble uses bg-ink-800, which the ink-900/950
+   rules above do NOT flip. Without this its flipped dark slate text would
+   sit on a dark bubble (invisible text) in light mode. */
+html.light [class*="bg-ink-800"] {
+  @apply bg-slate-100 border-slate-200;
+}
+
+/* Soft white borders/overlays become visible slate in light mode. */
+html.light [class*="border-white/5"],
+html.light [class*="border-white/10"],
+html.light [class*="border-white/[0.06]"],
+html.light [class*="border-white/[0.08]"],
+html.light [class*="border-white/15"],
+html.light [class*="border-white/[0.12]"],
+html.light [class*="border-white/20"],
+html.light [class*="border-white/[0.2]"] {
+  border-color: #e2e8f0; /* slate-200 */
+}
+html.light [class*="bg-white/10"],
+html.light [class*="bg-white/15"] {
+  background-color: #e2e8f0; /* slate-200 — inline code, hover chips */
+}
+
+/* Colored surfaces keep white labels in light mode too. */
+html.light .chat-user,
+html.light .chat-user a {
+  color: #ffffff;
+}
+html.light .btn-primary,
+html.light .btn-danger {
+  color: #ffffff;
+}
+/* Any element carrying BOTH a solid colored background and text-white
+   (FAB, selected chips, swipe actions, primary buttons) keeps white text —
+   the generic .text-white flip above would darken it. */
+html.light [class*="bg-accent-600"][class*="text-white"],
+html.light [class*="bg-success-600"][class*="text-white"],
+html.light [class*="bg-warning-600"][class*="text-white"],
+html.light [class*="bg-danger-600"][class*="text-white"] {
+  color: #ffffff;
+}
+
+/* ============================================================
+   Public marketing pages (Landing/About/Contact/Privacy/Terms)
+   are permanently dark by design. The .light theme flips
+   text-white/slate-* to dark colors globally — restore them
+   inside .public-site so the public pages never break.
+   ============================================================ */
+html.light .public-site .text-white { color: #ffffff; }
+html.light .public-site .text-slate-100 { color: #f1f5f9; }
+html.light .public-site .text-slate-200 { color: #e2e8f0; }
+html.light .public-site .text-slate-300 { color: #cbd5e1; }
+html.light .public-site .text-slate-400 { color: #94a3b8; }
+html.light .public-site .text-slate-500 { color: #64748b; }
+html.light .public-site [class*="bg-white/5"],
+html.light .public-site [class*="bg-white/[0.02]"],
+html.light .public-site [class*="bg-white/[0.03]"],
+html.light .public-site [class*="bg-white/[0.04]"],
+html.light .public-site [class*="bg-white/[0.06]"],
+html.light .public-site [class*="bg-white/10"],
+html.light .public-site [class*="bg-white/15"] {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+html.light .public-site [class*="border-white/5"],
+html.light .public-site [class*="border-white/10"],
+html.light .public-site [class*="border-white/15"],
+html.light .public-site [class*="border-white/20"] {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Warning/danger banners: flip tinted text for light backgrounds. */
+html.light [class*="text-warning-200"] { color: #78350f; } /* amber-900 */
+html.light [class*="text-warning-300"] { color: #92400e; } /* amber-800 */
+html.light [class*="text-danger-200"] { color: #991b1b; }  /* red-800 */
+html.light [class*="text-danger-300"] { color: #b91c1c; }  /* red-700 */
 
 /* ============================================================
    KaTeX rendering overrides

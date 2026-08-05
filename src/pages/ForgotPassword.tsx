@@ -26,13 +26,17 @@ export default function ForgotPassword() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true);
+    const target = email.trim();
+    console.info(`[forgot-password] submitting reset request for "${target}"`);
     try {
-      await forgotPassword(email.trim());
+      await forgotPassword(target);
+      console.info(`[forgot-password] reset link accepted for "${target}"`);
       setSent(true);
       toast.success("Password reset email sent. Check your inbox.");
     } catch (err: unknown) {
       // Detailed logging for debugging — never shown in the UI.
       console.error("[forgot-password] failed to send reset email", err);
+      if (err instanceof Error) console.error("[forgot-password] stack:\n" + (err.stack ?? ""));
       toast.error(resetErrorMessage(err));
     } finally { setLoading(false); }
   }

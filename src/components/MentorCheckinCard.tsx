@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Sparkles } from "lucide-react";
 import { db } from "../services/db";
 import { buildDailyCheckin } from "../services/mentorCheckin";
@@ -11,8 +11,8 @@ export default function MentorCheckinCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async (regenerate: boolean) => {
-    setBusy(true);
+  const load = useCallback(async (regenerate: boolean) => {
+    if (regenerate) setBusy(true);
     try {
       const today = todayISODate();
       let checkin = await db.getDailyCheckin(today);
@@ -32,11 +32,35 @@ export default function MentorCheckinCard() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [profile?.target_exam]);
 
+  // Mount-time load — inlined in the effect (React's documented fetch-on-mount
+  // shape) so the rule sees the post-await setStates instead of a traced call.
   useEffect(() => {
-    load(false);
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const today = todayISODate();
+        let checkin = await db.getDailyCheckin(today);
+        if (!checkin) {
+          const built = await buildDailyCheckin(profile?.target_exam);
+          if (built) {
+            checkin = await db.upsertDailyCheckin({
+              date: today,
+              message: built.message,
+              completed_tasks: built.completedTasks,
+              missed_tasks: built.missedTasks,
+              focus_score: built.focusScore,
+            });
+          }
+        }
+        if (!cancelled) setMessage(checkin?.message ?? null);
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.target_exam]);
 
   if (!message) return null;
 

@@ -24,6 +24,21 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Hard cap for a single profile load. On flaky mobile networks the Supabase
+// REST call can hang indefinitely; without this, `profileLoading` never
+// resolves and the auth callback (and every guard) shows an infinite spinner.
+const PROFILE_LOAD_TIMEOUT_MS = 15000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(`${label} (${ms}ms)`)), ms);
+    promise.then(
+      (v) => { window.clearTimeout(t); resolve(v); },
+      (e) => { window.clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 export const useAuth = () => {
   const c = useContext(AuthContext);
   if (!c) throw new Error("useAuth must be used within AuthProvider");
@@ -38,18 +53,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(false);
   const profileLoads = useRef(0);
   const prevUserRef = useRef<User | null>(null);
+  // Boot-time guard: getSession() and INITIAL_SESSION can both fire; the
+  // first one to complete wins the profile load and the loading flip.
+  // A ref (not `loading` state) keeps the guard stable without re-running
+  // the subscription effect.
+  const bootedRef = useRef(false);
 
-  async function loadProfile(uid: string, email: string, fullName: string | null) {
+  async function loadProfile(uid: string, email: string, fullName: string | null, avatarUrl?: string | null) {
     const n = ++profileLoads.current;
     setProfileLoading(true);
     try {
-      let p = await db.getProfile(uid);
-      if (p === null && profileLoads.current === n) {
-        // No profile row (e.g. user signed up before the profile trigger
-        // migration was applied) — create one so onboarding always works.
-        await db.ensureProfile(uid, email, fullName);
-        p = await db.getProfile(uid);
-      }
+      const p = await withTimeout((async () => {
+        let row = await db.getProfile(uid);
+        if (row === null && profileLoads.current === n) {
+          // No profile row (e.g. user signed up before the profile trigger existed) — create one so onboarding always works.
+          row = await db.ensureProfile(uid, email, fullName, avatarUrl);
+          if (row) return row;
+          row = await db.getProfile(uid);
+        }
+        return row;
+      })(), PROFILE_LOAD_TIMEOUT_MS, "[auth] profile load timed out");
       if (profileLoads.current === n) setProfile(p);
     } catch (err) {
       console.error("[auth] loadProfile threw", err);
@@ -71,9 +94,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // exchanged.
     if (!supabase) {
       console.error("[auth] Supabase client not initialized — auth unavailable");
+      // Boot-time one-off: nothing async has started yet, so this synchronous
+      // state flip is the only way to bail out of the boot loader here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }
+
+    // Explicitly call getSession() as a fallback: onAuthStateChange should
+    // fire INITIAL_SESSION automatically once the client finishes initialising,
+    // but if the OAuth code exchange fails silently or the storage is in an
+    // unexpected state, that event may never arrive. getSession() awaits client
+    // initialisation (storage recovery + OAuth callback URL processing), so it
+    // can never resolve prematurely — exiting the boot loader here guarantees
+    // the app can't hang on an infinite loading screen.
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user && !bootedRef.current) {
+        bootedRef.current = true;
+        setUser(session.user);
+        const um = session.user.user_metadata ?? {};
+        const fullName = um.full_name ?? um.name ?? null;
+        const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
+        void loadProfile(session.user.id, session.user.email ?? "", fullName, avatarUrl);
+      }
+    }).catch((err) => {
+      console.error("[auth] getSession fallback failed", err);
+    }).finally(() => {
+      if (!bootedRef.current) {
+        bootedRef.current = true;
+        setLoading(false);
+      }
+    });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const hadSession = Boolean(prevUserRef.current);
@@ -82,10 +133,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
         setLoading(false);
       }
-      (async () => {
+       (async () => {
         try {
           if (session?.user) {
-            await loadProfile(session.user.id, session.user.email ?? "", session.user.user_metadata?.full_name ?? null);
+            const um = session.user.user_metadata ?? {};
+            const fullName = um.full_name ?? um.name ?? null;
+            const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
+            await loadProfile(session.user.id, session.user.email ?? "", fullName, avatarUrl);
           } else {
             if (event === "SIGNED_OUT" && hadSession) {
               toast.info("Your session expired. Please sign in again.");
@@ -148,23 +202,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
   async function forgotPassword(email: string) {
     if (!supabase) throw new Error("Supabase client not initialized");
+    const normalized = email.trim();
+    const redirectTo = RESET_PASSWORD_REDIRECT_URL;
+    console.info(`[auth] forgot-password: requesting reset link for "${normalized}" -> ${redirectTo}`);
     try {
-      const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: RESET_PASSWORD_REDIRECT_URL,
+      const { data, error } = await supabase.auth.resetPasswordForEmail(normalized, {
+        redirectTo,
       });
       // GoTrue returns HTTP 200 with an EMPTY body {} on success (even for
       // unknown emails — anti-enumeration). An empty "{}" response here is a
       // SUCCESS, not an error; an error only surfaces via the `error` field.
-      console.info(`[auth] resetPasswordForEmail accepted for ${email}; redirectTo=${RESET_PASSWORD_REDIRECT_URL}; response=${JSON.stringify(data)}`);
+      console.info(`[auth] forgot-password: Supabase accepted the request; redirectTo=${redirectTo}; response=${JSON.stringify(data)}`);
       if (error) throw error;
     } catch (err) {
-      console.error("[auth] resetPasswordForEmail failed", stringifyError(err));
-      throw err;
+      // Never swallow the error: log the full object (message/status/code/
+      // stack) so failures are diagnosable, then rethrow a normalized Error.
+      console.error("[auth] forgot-password: resetPasswordForEmail FAILED", stringifyError(err));
+      if (err instanceof Error) {
+        console.error("[auth] forgot-password: stack trace:\n" + (err.stack ?? ""));
+        const status = (err as { status?: number }).status;
+        if (status) console.error(`[auth] forgot-password: HTTP status ${status}`);
+        if (status === 429 || /rate limit|too many/i.test(err.message)) {
+          console.error("[auth] forgot-password: GoTrue rate limit hit — email sends are throttled per address/IP; wait before retrying.");
+        }
+        throw new Error(err.message, { cause: err });
+      }
+      throw new Error("Failed to send password reset email.", { cause: err });
     }
   }
-  async function refreshProfile() {
-    if (user) await loadProfile(user.id, user.email ?? "", user.user_metadata?.full_name ?? null);
-  }
+   async function refreshProfile() {
+     if (user) {
+       const um = user.user_metadata ?? {};
+       const fullName = um.full_name ?? um.name ?? null;
+       const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
+       await loadProfile(user.id, user.email ?? "", fullName, avatarUrl);
+     }
+   }
 
   return (
     <AuthContext.Provider

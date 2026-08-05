@@ -19,7 +19,6 @@ const Layout = lazy(() => import("./pages/dashboard/Layout"));
 const DashboardHome = lazy(() => import("./pages/dashboard/DashboardHome"));
 const AIPlanner = lazy(() => import("./pages/dashboard/AIPlanner"));
 const Mentor = lazy(() => import("./pages/dashboard/Mentor"));
-const VoiceMode = lazy(() => import("./pages/dashboard/VoiceMode"));
 const BacklogPlanner = lazy(() => import("./pages/dashboard/BacklogPlanner"));
 const RecoveryBucket = lazy(() => import("./pages/dashboard/RecoveryBucket"));
 const SubjectManager = lazy(() => import("./pages/dashboard/SubjectManager"));
@@ -27,6 +26,7 @@ const FormulaVault = lazy(() => import("./pages/dashboard/FormulaVault"));
 const FocusTimer = lazy(() => import("./pages/dashboard/FocusTimer"));
 const Analytics = lazy(() => import("./pages/dashboard/Analytics"));
 const Settings = lazy(() => import("./pages/dashboard/Settings"));
+const AcademicPreferences = lazy(() => import("./pages/dashboard/AcademicPreferences"));
 const Profile = lazy(() => import("./pages/dashboard/Profile"));
 
 export default function App() {
@@ -71,7 +71,6 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardHome />} />
           <Route path="/planner" element={<AIPlanner />} />
           <Route path="/mentor" element={<Mentor />} />
-          <Route path="/voice" element={<VoiceMode />} />
           <Route path="/backlogs" element={<BacklogPlanner />} />
           <Route path="/recovery" element={<RecoveryBucket />} />
           <Route path="/subjects" element={<SubjectManager />} />
@@ -80,13 +79,13 @@ export default function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/preferences" element={<AcademicPreferences />} />
         </Route>
 
         {/* ── Legacy /app URLs → canonical dashboard paths ───────────────── */}
         <Route path="/app" element={<Navigate to="/dashboard" replace />} />
         <Route path="/app/planner" element={<Navigate to="/planner" replace />} />
         <Route path="/app/mentor" element={<Navigate to="/mentor" replace />} />
-        <Route path="/app/voice" element={<Navigate to="/voice" replace />} />
         <Route path="/app/backlog" element={<Navigate to="/backlogs" replace />} />
         <Route path="/app/recovery" element={<Navigate to="/recovery" replace />} />
         <Route path="/app/subjects" element={<Navigate to="/subjects" replace />} />
@@ -94,6 +93,7 @@ export default function App() {
         <Route path="/app/timer" element={<Navigate to="/timer" replace />} />
         <Route path="/app/analytics" element={<Navigate to="/analytics" replace />} />
         <Route path="/app/settings" element={<Navigate to="/settings" replace />} />
+        <Route path="/app/preferences" element={<Navigate to="/preferences" replace />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { Check, Eye, EyeOff, Lock, X } from "lucide-react";
+import { PASSWORD_RULES } from "../../lib/passwordRules";
 
 interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -36,17 +37,6 @@ export function PasswordInput({ label, error, hint, id, className, ...props }: P
       {hint && <div className="mt-1">{hint}</div>}
     </label>
   );
-}
-
-export const PASSWORD_RULES: { id: string; label: string; test: (p: string) => boolean }[] = [
-  { id: "length", label: "Minimum 8 characters", test: (p) => p.length >= 8 },
-  { id: "upper", label: "One uppercase letter", test: (p) => /[A-Z]/.test(p) },
-  { id: "lower", label: "One lowercase letter", test: (p) => /[a-z]/.test(p) },
-  { id: "number", label: "One number", test: (p) => /\d/.test(p) },
-];
-
-export function passwordMeetsRequirements(p: string): boolean {
-  return PASSWORD_RULES.every((r) => r.test(p));
 }
 
 export function PasswordRequirements({ password }: { password: string }) {

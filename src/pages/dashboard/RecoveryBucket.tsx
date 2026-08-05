@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { RotateCcw, Trash2, CheckCircle2, Clock, AlertCircle } from "lucide-react";
 import { useToast } from "../../context/ToastContext";
 import { db } from "../../services/db";
-import { Card, CardBody, SectionTitle, EmptyState, Button } from "../../components/ui";
+import { Card, CardBody, SectionTitle, EmptyState } from "../../components/ui";
 import { minutesToHM, TASK_TYPE_LABELS } from "../../lib/constants";
 import type { RecoveryItem } from "../../lib/types";
 
@@ -19,18 +19,30 @@ export default function RecoveryBucket() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "pending" | "recovered">("pending");
 
-  useEffect(() => { load(); }, [filter]);
-
-  async function load() {
+  // Refetch whenever the filter changes. The fetch lives inside the effect
+  // (React's documented fetch-on-mount shape), and the loading flip happens
+  // during render when the filter changes so the spinner shows immediately.
+  const [prevFilter, setPrevFilter] = useState(filter);
+  if (prevFilter !== filter) {
+    setPrevFilter(filter);
     setLoading(true);
-    try {
-      const data = filter === "all" ? await db.getRecoveryItems() : await db.getRecoveryItems(filter);
-      setItems(data);
-    } catch (err) {
-      console.error("[RecoveryBucket] load threw", err);
-      setItems([]);
-    } finally { setLoading(false); }
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = filter === "all" ? await db.getRecoveryItems() : await db.getRecoveryItems(filter);
+        if (!cancelled) setItems(data);
+      } catch (err) {
+        console.error("[RecoveryBucket] load threw", err);
+        if (!cancelled) setItems([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [filter]);
 
   async function markRecovered(id: string) {
     try { await db.markRecoveryRecovered(id); setItems((p) => p.filter((i) => i.id !== id)); toast.success("Marked as recovered"); }

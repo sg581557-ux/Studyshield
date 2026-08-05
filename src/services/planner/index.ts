@@ -2,12 +2,12 @@ import { db, aliasExamId } from "../db";
 import { TASK_TYPE_LABELS } from "../../lib/constants";
 import type {
   BacklogItem, EnergyLevel, PlanTask, Priority, Profile, BacklogKind,
-  SyllabusSubject, SyllabusChapter, UserChapter, Formula,
+  SyllabusSubject, SyllabusChapter, UserChapter,
   TaskStatus, RecoveryItem, StudyStats,
 } from "../../lib/types";
 import { computeTaskPriority, rankChapters } from "./priorityEngine";
 import { predictedDuration, updateStudyStats } from "./learningModel";
-import { moveMissedTasksToRecovery, getRecoveryTasksForDay, markRecoveryCompleted, type RecoveryTaskWithId } from "./recoveryEngine";
+import { moveMissedTasksToRecovery, getRecoveryTasksForDay } from "./recoveryEngine";
 import { getRevisionCandidates, getUpcomingRevisionSchedule, type RevisionCandidate, type RevisionEvent } from "./revisionEngine";
 import { detectBurnout, applyBurnoutAdjustments, type BurnoutSignal } from "./burnoutDetector";
 import {
@@ -153,7 +153,12 @@ function fmtTime(base: Date, minutesFromBase: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function pick<T>(arr: T[], i: number): T | null { return arr.length === 0 ? null : arr[i % arr.length]; }
+function toMin(hhmm: string | undefined | null): number | null {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
 
 function hasProgressFlags(uc: UserChapter): boolean {
   const p = uc.progress as Record<string, unknown> | null;
@@ -259,20 +264,50 @@ function weakChapters(ucs: UserChapter[]) {
     .map((u) => ({ subject: u.subject, chapter: u.chapter })).sort((a, b) => a.subject.localeCompare(b.subject));
 }
 
-function unstartedChapters(subjects: SyllabusSubject[], chapters: SyllabusChapter[], ucs: UserChapter[]) {
-  const done = new Set(ucs.map((u) => `${u.subject}|${u.chapter}`));
-  const out: { subject: string; chapter: string }[] = [];
-  for (const s of subjects) for (const c of chapters.filter((c) => c.subject_id === s.id)) if (!done.has(`${s.name}|${c.name}`)) out.push({ subject: s.name, chapter: c.name });
-  return out;
-}
-
 function buildCoaching(profile: Profile, date: string): PlannedTask[] {
-  if (!profile.coaching_enabled || !profile.coaching_days?.length) return [];
-  const wd = new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
-  if (!profile.coaching_days.includes(wd)) return [];
+  if (!profile.coaching_enabled) return [];
+  const dateObj = new Date(date + "T00:00:00");
+  const wdShort = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+  const wdLong = dateObj.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+  const name = profile.coaching_name || "Online class";
+  const schedule = Array.isArray(profile.class_schedule) ? profile.class_schedule : [];
+  if (profile.class_mode === "live" && schedule.length > 0) {
+    const tasks: PlannedTask[] = [];
+    for (const b of schedule) {
+      if (!b || b.day !== wdLong || !b.start || !b.end || b.start >= b.end) continue;
+      const [sh, sm] = b.start.split(":").map(Number);
+      const [eh, em] = b.end.split(":").map(Number);
+      if (!Number.isFinite(sh) || !Number.isFinite(eh)) continue;
+      tasks.push({ title: `Coaching: ${name}`, subject: null, type: "coaching", estimated_minutes: Math.max(30, (eh * 60 + em) - (sh * 60 + sm)), priority: "high", chapter: null, source: "coaching", priority_score: 10, tracker_ref: { class_start: b.start, class_end: b.end }, reason: "Today's live class — the plan is built around what is being taught right now." });
+    }
+    return tasks;
+  }
+  if (!profile.coaching_days?.length) return [];
+  if (!profile.coaching_days.includes(wdShort)) return [];
   const [sh, sm] = (profile.coaching_start ?? "16:00").split(":").map(Number);
   const [eh, em] = (profile.coaching_end ?? "19:00").split(":").map(Number);
-  return [{ title: `Coaching: ${profile.coaching_name || "Online class"}`, subject: null, type: "coaching", estimated_minutes: Math.max(30, (eh * 60 + em) - (sh * 60 + sm)), priority: "high", chapter: null, source: "coaching", priority_score: 10, tracker_ref: null, reason: "Today's coaching — the plan is built around what is being taught right now." }];
+  return [{ title: `Coaching: ${name}`, subject: null, type: "coaching", estimated_minutes: Math.max(30, (eh * 60 + em) - (sh * 60 + sm)), priority: "high", chapter: null, source: "coaching", priority_score: 10, tracker_ref: { class_start: profile.coaching_start ?? "16:00", class_end: profile.coaching_end ?? "19:00" }, reason: "Today's coaching — the plan is built around what is being taught right now." }];
+}
+
+// School hours for the given date (onboarding v3: school_days + timings).
+// Pinned like live classes — study tasks are never placed inside these hours.
+function buildSchool(profile: Profile, date: string): PlannedTask | null {
+  const days = Array.isArray(profile.school_days) ? profile.school_days : [];
+  if (days.length === 0) return null;
+  const dateObj = new Date(date + "T00:00:00");
+  const wdLong = dateObj.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+  if (!days.includes(wdLong)) return null;
+  const start = profile.school_start ?? "07:00";
+  const end = profile.school_end ?? "14:00";
+  if (!start || !end || start >= end) return null;
+  const mins = Math.max(30, (toMin(end) ?? 0) - (toMin(start) ?? 0));
+  return {
+    title: profile.school_name || "School",
+    subject: null, type: "school", estimated_minutes: mins,
+    priority: "high", chapter: null, source: "school", priority_score: 10,
+    tracker_ref: { class_start: start, class_end: end },
+    reason: `School hours (${wdLong}) — the plan is built around your free time.`,
+  };
 }
 
 interface PlannedTask {
@@ -364,7 +399,7 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   const v = validatePlannerInput(input);
   if (!v.valid) { console.error("[mentor-planner] validation failed:", v.errors); throw new PlannerErrorClass("INVALID_INPUT", `Cannot generate plan: ${v.errors.join(" ")}`); }
 
-  const { profile, studyHours, energyLevel, wasSchoolDay, examTomorrow, date, notes, completedToday, unexpectedEvents } = input;
+  const { profile, studyHours, energyLevel, wasSchoolDay, examTomorrow, date, unexpectedEvents } = input;
   const requestedMinutesBase = Math.max(0, Math.round(studyHours * 60));
   let requestedMinutes = requestedMinutesBase;
   console.info("[mentor-planner] start", { userId: profile.id, studyHours, requestedMinutesBase, date, energy: energyLevel, examTomorrow });
@@ -372,7 +407,7 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   // --- Load data ---
   const examKey = aliasExamId(profile.target_exam ?? "");
   let subjects: SyllabusSubject[] = [], chapterRows: SyllabusChapter[] = [], userChapters: UserChapter[] = [];
-  let backlog: BacklogItem[] = [], formulas: Formula[] = [];
+  let backlog: BacklogItem[] = [];
   let stats: StudyStats | null = null;
 
   try { subjects = await db.getSubjects(examKey); } catch (e) { console.error("[mentor-planner] getSubjects", e); warnings.push("Failed to load subjects."); }
@@ -382,7 +417,6 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   }
   try { userChapters = await db.getUserChapters(); } catch (e) { console.error("[mentor-planner] getUserChapters", e); }
   try { backlog = await db.getBacklogItems(profile.target_exam); } catch (e) { console.error("[mentor-planner] backlog", e); }
-  try { formulas = await db.getFormulasForExam(examKey); } catch (e) { console.error("[mentor-planner] formulas", e); }
   try { stats = await db.getStudyStats(); } catch (e) { console.error("[mentor-planner] stats", e); }
 
   // Habit calibration: size the plan against the user's actual study behavior
@@ -398,7 +432,6 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   const recovery = await db.getRecoveryItems("pending").catch(() => [] as RecoveryItem[]);
   const pool = categorizeBacklog(backlog);
   const weak = weakChapters(userChapters);
-  const unstarted = unstartedChapters(subjects, chapterRows, userChapters);
 
   // ================= REASONING =================
   // 1. Goal: exam + target. 2. Time: requested vs realistic.
@@ -410,7 +443,6 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   prevDate.setDate(prevDate.getDate() - 1);
   const prevDateStr = prevDate.toISOString().slice(0, 10);
   const prevTasks = await db.getTasksForDate(prevDateStr).catch(() => [] as PlanTask[]);
-  const prevInputs = await db.getDailyPlanInputs(prevDateStr).catch(() => null);
 
   const completedPrev = prevTasks.filter((t) => (t.task_status ?? (t.completed ? "completed" : "pending")) === "completed").length;
   const plannedPrevCount = prevTasks.length;
@@ -422,13 +454,6 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   const burnout = detectBurnout(recentCompleted, [energyLevel], [studyHours]);
   if (burnout.detected) warnings.push(`Burnout detected (${burnout.level}): ${burnout.reasons.join("; ")}`);
 
-  // Dangerous backlog: overdue or due within 3 days, or high priority.
-  const dangerousBacklog = backlog.filter((b) => {
-    if (b.status !== "todo") return false;
-    const due = daysUntil(b.due_date);
-    return (due !== null && due <= 3) || b.priority === "high";
-  });
-
   // Test week: exam tomorrow or nearest due date within 7 days.
   let daysToTest: number | null = examTomorrow ? 1 : null;
   if (daysToTest === null) {
@@ -439,8 +464,12 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   if (testWeek) warnings.push(`Upcoming test in ${daysToTest} day${daysToTest === 1 ? "" : "s"} — backlog reduced, revision & PYQs boosted.`);
 
   // Realism: never overplan. Yesterday <50% completion → cut 15%.
+  // Explicit school schedule (v3) already accounts for school hours — no extra
+  // discount needed. Fall back to the legacy 0.85 estimate otherwise.
+  const schoolBlock = buildSchool(profile, date);
   let adjusted = applyBurnoutAdjustments(requestedMinutes, energyLevel, burnout);
-  if (wasSchoolDay && profile.attends_school) adjusted = Math.round(adjusted * 0.85);
+  if (wasSchoolDay && profile.attends_school && !schoolBlock) adjusted = Math.round(adjusted * 0.85);
+  if (wasSchoolDay && profile.attends_school && !schoolBlock) warnings.push("School day — plan sized to realistic free hours.");
   if (completionRatePrev !== null && completionRatePrev < 0.5) adjusted = Math.round(adjusted * 0.85);
   if (isDayOff(profile, new Date(`${date}T00:00:00`))) { adjusted = Math.round(adjusted * 0.6); warnings.push("Day off — light plan with more revision and review."); }
   adjusted = Math.max(60, adjusted);
@@ -458,7 +487,6 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   const schedulableMinutes = Math.max(60, utilTargetMinutes - breakMinutes);
 
   const practiceBoost = energyLevel === "high" ? 1.3 : 1;
-  const backlogCapFactor = testWeek ? 0.5 : 1;
 
   // ================= PRIORITY LADDER =================
   const activeChapters = getActiveChapters(userChapters, backlog, recovery, profile);
@@ -801,13 +829,19 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
     if (t.subject) bySubject[t.subject] = (bySubject[t.subject] ?? 0) + 1;
   }
 
-  // Slot-aware scheduling: hard task types land in the user's peak-productive
-  // slots (observed first, then onboarding choices, then chronological).
+  // ===== Sleep is a CONSTRAINT ONLY: it defines unavailable hours (sleep window)
+  // so tasks are never placed during sleep. It does NOT reduce study goals,
+  // influence task priority, or weight the allocation. Sleep timing only affects
+  // which time slots are available for placement.
+  // When sleep hour is before wake hour (e.g., 2 AM sleep, 8 AM wake), sleep
+  // is treated as belonging to the next day — available window extends to midnight.
   const slotDefs: Record<string, { from: number; to: number }> = {
-    morning: { from: 5, to: 12 },
+    early_morning: { from: 4, to: 8 },
+    morning: { from: 8, to: 12 },
     afternoon: { from: 12, to: 16 },
     evening: { from: 16, to: 20 },
-    night: { from: 20, to: 24 },
+    night: { from: 20, to: 22 },
+    night_owl: { from: 22, to: 24 },
   };
   let wakeHour = profile.wake_up_time ? Number(profile.wake_up_time.slice(0, 2)) : 7;
   let sleepHour = profile.sleep_time ? Number(profile.sleep_time.slice(0, 2)) : 23;
@@ -836,27 +870,58 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   const scheduledTasks = [...hardGroups, ...softTasks];
 
   const base = new Date(`${date}T00:00:00`);
+
+  // Tasks with tracker_ref.class_start/class_end (live classes, school hours)
+  // are pinned to their exact ranges, which are reserved so no study task
+  // ever overlaps them.
+  const hasPinnedTime = (t: PlannedTask) =>
+    typeof t.tracker_ref?.class_start === "string" && typeof t.tracker_ref?.class_end === "string";
+  const pinnedTasks = scheduledTasks.filter(hasPinnedTime);
+  if (schoolBlock && schoolBlock.tracker_ref?.class_start && schoolBlock.tracker_ref?.class_end) pinnedTasks.push(schoolBlock);
+  const movableTasks = scheduledTasks.filter((t) => !hasPinnedTime(t));
+  const blocked = pinnedTasks
+    .map((t) => ({ start: toMin(t.tracker_ref!.class_start as string)!, end: toMin(t.tracker_ref!.class_end as string)! }))
+    .filter((b) => b.start !== null && b.end !== null && b.start < b.end);
+
   let cursor = 0;
   let slotIdx = 0;
-  const tasksOut: PlanTask[] = scheduledTasks.map((t) => {
+  const tasksOut: PlanTask[] = [];
+  for (const t of movableTasks) {
     while (slotIdx < slotOrder.length - 1) {
       const sMin = slotStartMin(slotOrder[slotIdx]);
       const eMin = slotEndMin(slotOrder[slotIdx]);
       if (cursor < sMin) cursor = sMin;
+      const blk = blocked.find((b) => cursor + t.estimated_minutes > b.start && cursor < b.end);
+      if (blk) { cursor = blk.end; continue; } // skip past the live class / school
       if (cursor + t.estimated_minutes <= eMin) break;
       slotIdx++;
       cursor = slotStartMin(slotOrder[slotIdx]);
     }
     const start = fmtTime(base, cursor); cursor += t.estimated_minutes; const end = fmtTime(base, cursor);
-    return {
+    tasksOut.push({
       id: "", user_id: "", plan_id: null, title: t.title, subject: t.subject, type: t.type,
       estimated_minutes: t.estimated_minutes, priority: t.priority, completed: false,
       scheduled_date: date, created_at: "", start_time: start, end_time: end,
       chapter: t.chapter, source: t.source, tracker_ref: { ...(t.tracker_ref ?? {}), reason: t.reason }, completion_pct: 0,
       task_status: "pending" as TaskStatus, missed_count: 0, reschedule_reason: null,
       actual_minutes: null, priority_score: t.priority_score,
-    };
-  });
+    });
+  }
+  for (const t of pinnedTasks) {
+    const start = t.tracker_ref!.class_start as string;
+    const end = t.tracker_ref!.class_end as string;
+    const mins = (toMin(end)! - toMin(start)!);
+    tasksOut.push({
+      id: "", user_id: "", plan_id: null, title: t.title, subject: t.subject, type: t.type,
+      estimated_minutes: mins > 0 ? mins : t.estimated_minutes, priority: t.priority, completed: false,
+      scheduled_date: date, created_at: "", start_time: start, end_time: end,
+      chapter: t.chapter, source: t.source, tracker_ref: { ...(t.tracker_ref ?? {}), reason: t.reason }, completion_pct: 0,
+      task_status: "pending" as TaskStatus, missed_count: 0, reschedule_reason: null,
+      actual_minutes: null, priority_score: t.priority_score,
+    });
+  }
+  tasksOut.sort((a, b) => (toMin(a.start_time) ?? 0) - (toMin(b.start_time) ?? 0));
+  for (const b of blocked) cursor = Math.max(cursor, b.end);
 
   const finishTime = fmtTime(base, cursor);
   const gap = adjusted - scheduled;
@@ -948,12 +1013,10 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
 // --- Weekly / Monthly goal generation ---
 
 export async function generateWeeklyGoal(profile: Profile): Promise<WeeklyGoal> {
-  const examKey = aliasExamId(profile.target_exam ?? "");
-  let subjects: SyllabusSubject[] = [], userChapters: UserChapter[] = [];
+  let userChapters: UserChapter[] = [];
   let backlog: BacklogItem[] = [];
-  try { subjects = await db.getSubjects(examKey); } catch {}
-  try { userChapters = await db.getUserChapters(); } catch {}
-  try { backlog = await db.getBacklogItems(profile.target_exam); } catch {}
+  try { userChapters = await db.getUserChapters(); } catch { /* not found — treat as empty */ }
+  try { backlog = await db.getBacklogItems(profile.target_exam); } catch { /* not found — treat as empty */ }
 
   const ranked = rankChapters(userChapters, backlog, [], profile);
   const targetChapters = ranked.filter((c) => c.status !== "completed" && c.status !== "mastered").slice(0, 5)
@@ -971,12 +1034,10 @@ export async function generateWeeklyGoal(profile: Profile): Promise<WeeklyGoal> 
 }
 
 export async function generateMonthlyGoal(profile: Profile): Promise<MonthlyGoal> {
-  const examKey = aliasExamId(profile.target_exam ?? "");
-  let subjects: SyllabusSubject[] = [], userChapters: UserChapter[] = [];
+  let userChapters: UserChapter[] = [];
   let backlog: BacklogItem[] = [];
-  try { subjects = await db.getSubjects(examKey); } catch {}
-  try { userChapters = await db.getUserChapters(); } catch {}
-  try { backlog = await db.getBacklogItems(profile.target_exam); } catch {}
+  try { userChapters = await db.getUserChapters(); } catch { /* not found — treat as empty */ }
+  try { backlog = await db.getBacklogItems(profile.target_exam); } catch { /* not found — treat as empty */ }
 
   const ranked = rankChapters(userChapters, backlog, [], profile);
   const majorChapters = ranked.filter((c) => c.status !== "completed" && c.status !== "mastered").slice(0, 10)

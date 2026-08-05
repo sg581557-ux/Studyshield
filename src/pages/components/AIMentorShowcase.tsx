@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import {
-  Brain, Mic, Sparkles, Bot, Languages, TrendingUp, CheckCircle2,
+  Brain, Sparkles, Bot, Languages, TrendingUp, CheckCircle2,
 } from "lucide-react";
 
 // Static chat mockup for the landing page "AI Mentor" showcase.
@@ -29,7 +29,6 @@ export default function AIMentorShowcase() {
           <ul className="space-y-3">
             {[
               { icon: <Sparkles className="w-4 h-4 text-purple-400" />, text: "Answers in the language you speak" },
-              { icon: <Mic className="w-4 h-4 text-blue-400" />, text: "Talk to it — hands-free voice conversations" },
               { icon: <TrendingUp className="w-4 h-4 text-emerald-400" />, text: "Tracks your progress and reminds you of backlogs" },
             ].map((f, i) => (
               <li key={i} className="flex items-center gap-3 text-gray-300">
@@ -84,26 +83,7 @@ export default function AIMentorShowcase() {
                     <span className="rounded-lg bg-emerald-500/15 border border-emerald-400/25 px-2 py-1 text-[11px] text-emerald-300 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> DPP scheduled 6:00 PM
                     </span>
-                    <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-slate-300 flex items-center gap-1">
-                      <Mic className="w-3 h-3" /> Voice reply available
-                    </span>
                   </div>
-                </div>
-                <div className="flex items-center justify-end gap-1.5">
-                  <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                    <Mic className="w-3 h-3 text-white" />
-                  </div>
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <motion.span
-                        key={i}
-                        animate={{ opacity: [0.3, 1, 0.3] }}
-                        transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
-                        className="w-1.5 h-1.5 rounded-full bg-purple-400"
-                      />
-                    ))}
-                  </div>
-                  <span className="text-[11px] text-slate-500">Listening…</span>
                 </div>
               </div>
             </div>

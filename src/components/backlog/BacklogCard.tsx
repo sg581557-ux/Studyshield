@@ -5,7 +5,7 @@ import type { BacklogItem, BacklogKind } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import {
   extractBacklogResources, estimatedMinutesFor, minutesToHM, PRIORITY_META,
-  remainingOf, resourceMeta, resourceSummary, subjectColor, pctOf,
+  remainingOf, resourceMeta, resourceSummary, subjectColor,
 } from "../../lib/backlogMeta";
 
 interface BacklogCardProps {
@@ -49,8 +49,8 @@ export function BacklogCard({ item, onEdit, onDelete, onToggleComplete, onIncrem
 
   return (
     <div className="relative rounded-2xl overflow-hidden group">
-      {/* Swipe action backgrounds */}
-      <div className="absolute inset-0 flex">
+      {/* Swipe action backgrounds — purely decorative, revealed by the drag */}
+      <div className="absolute inset-0 flex" aria-hidden="true">
         <div className="flex-1 bg-danger-600/90 flex items-center justify-start pl-5 text-white">
           <Trash2 className="w-5 h-5" />
         </div>
@@ -89,8 +89,17 @@ export function BacklogCard({ item, onEdit, onDelete, onToggleComplete, onIncrem
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
+                onClick={(e) => { e.stopPropagation(); onToggleComplete(item); }}
+                title={done ? "Mark as not done" : "Mark as done"}
+                aria-label={done ? "Mark as not done" : "Mark as done"}
+                className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                {done ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              </button>
+              <button
                 onClick={(e) => { e.stopPropagation(); onEdit(item); }}
                 title="Edit"
+                aria-label="Edit backlog item"
                 className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
               >
                 <Pencil className="w-3.5 h-3.5" />
@@ -98,6 +107,7 @@ export function BacklogCard({ item, onEdit, onDelete, onToggleComplete, onIncrem
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(item); }}
                 title="Delete"
+                aria-label="Delete backlog item"
                 className="w-7 h-7 rounded-lg bg-white/5 hover:bg-danger-600/30 text-slate-400 hover:text-danger-400 flex items-center justify-center transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -110,7 +120,6 @@ export function BacklogCard({ item, onEdit, onDelete, onToggleComplete, onIncrem
             {Object.entries(resources).filter(([, r]) => (r?.total ?? 0) > 0).map(([k, r]) => {
               const meta = resourceMeta(k as BacklogKind);
               const rem = remainingOf(r);
-              const pct = pctOf(r);
               const active = rem > 0 && !done;
               return (
                 <button

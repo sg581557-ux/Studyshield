@@ -7,7 +7,8 @@ import { authErrorMessage } from "../context/AuthContext";
 import { stringifyError } from "../lib/authErrors";
 import { useToast } from "../context/ToastContext";
 import { Button } from "../components/ui";
-import { PasswordInput, PasswordRequirements, passwordMeetsRequirements } from "../components/auth/PasswordInput";
+import { PasswordInput, PasswordRequirements } from "../components/auth/PasswordInput";
+import { passwordMeetsRequirements } from "../lib/passwordRules";
 
 export default function ResetPassword() {
   const navigate = useNavigate();

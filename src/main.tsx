@@ -4,7 +4,6 @@ import { BrowserRouter } from "react-router-dom";
 import { ToastProvider } from "./context/ToastContext";
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
-import { VoiceProvider } from "./context/VoiceContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import App from "./App";
 import "katex/dist/katex.min.css";
@@ -17,9 +16,7 @@ createRoot(document.getElementById("root")!).render(
         <ToastProvider>
           <AuthProvider>
             <ThemeProvider>
-              <VoiceProvider>
-                <App />
-              </VoiceProvider>
+              <App />
             </ThemeProvider>
           </AuthProvider>
         </ToastProvider>

@@ -53,7 +53,7 @@ const SECTIONS = [
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+    <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
       <PublicNavbar />
       <main className="pt-40 pb-32 px-6 max-w-3xl mx-auto">
         <div className="mb-12">

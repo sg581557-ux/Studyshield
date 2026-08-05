@@ -13,8 +13,8 @@ import type { Profile, PlanTask, FocusSession } from "../lib/types";
 import { db } from "./db";
 import { weekdayStudyHours } from "../lib/onboarding";
 
-export const SLOT_ORDER_DEFAULT = ["morning", "afternoon", "evening", "night"] as const;
-export const HEAVY_TASK_TYPES = ["lecture", "module", "dpp", "pyq", "mock_test_review", "mistake_analysis"];
+export const SLOT_ORDER_DEFAULT = ["early_morning", "morning", "afternoon", "evening", "night", "night_owl"] as const;
+export const HEAVY_TASK_TYPES = ["lecture", "module", "dpp", "pyq", "mock_test", "mock_test_review", "mistake_analysis"];
 
 const OBSERVATION_DAYS = 7;
 const ACTIVATE_AFTER_DAYS = 3;
@@ -41,17 +41,19 @@ export interface Calibration {
 }
 
 function slotForHour(hour: number): string {
-  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 4 && hour < 8) return "early_morning";
+  if (hour >= 8 && hour < 12) return "morning";
   if (hour >= 12 && hour < 16) return "afternoon";
   if (hour >= 16 && hour < 20) return "evening";
-  return "night";
+  if (hour >= 20 && hour < 22) return "night";
+  return "night_owl"; // 22–24 and 0–4
 }
 
 function taskMinutes(t: PlanTask): number {
   return t.actual_minutes ?? t.estimated_minutes;
 }
 
-export async function computeHabitStats(profile: Profile): Promise<HabitStats> {
+export async function computeHabitStats(_profile: Profile): Promise<HabitStats> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const cutoff = new Date(today);
@@ -109,7 +111,7 @@ export async function computeHabitStats(profile: Profile): Promise<HabitStats> {
   const startDelayAvg = delays.length > 0 ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : null;
 
   // Best productive slot by completed study minutes.
-  const slotMinutes: Record<string, number> = { morning: 0, afternoon: 0, evening: 0, night: 0 };
+  const slotMinutes: Record<string, number> = { early_morning: 0, morning: 0, afternoon: 0, evening: 0, night: 0, night_owl: 0 };
   for (const t of completed) {
     const hh = Number((t.start_time ?? "").slice(0, 2));
     if (Number.isFinite(hh)) slotMinutes[slotForHour(hh)] += taskMinutes(t);
@@ -159,17 +161,20 @@ export function calibrateStudyHours(selectedHours: number, stats: HabitStats): C
   };
 }
 
-// Peak-productivity slot order: observed best slots first, then the user's
-// chosen slots, then the default chronological order.
+// Peak-productivity slot order: the user's explicitly preferred productive
+// window (v3 productive_time) first, then observed best slots, then the
+// user's chosen slots, then the default chronological order.
 export function slotOrderFor(profile: Profile, stats: HabitStats | null): string[] {
   const ranked = stats
     ? SLOT_ORDER_DEFAULT.slice()
         .sort((a, b) => (stats.slotMinutes[b] ?? 0) - (stats.slotMinutes[a] ?? 0))
     : [];
+  const pref = profile.productive_time || profile.preferred_study_time;
+  const prefList = pref && pref !== "flexible" ? [pref] : [];
   const chosen = profile.productive_slots ?? [];
   const seen = new Set<string>();
   const order: string[] = [];
-  for (const s of [...ranked, ...chosen, ...SLOT_ORDER_DEFAULT]) {
+  for (const s of [...prefList, ...ranked, ...chosen, ...SLOT_ORDER_DEFAULT]) {
     if (!seen.has(s)) { seen.add(s); order.push(s); }
   }
   return order;
@@ -181,11 +186,21 @@ export function isDayOff(profile: Profile, date: Date): boolean {
 }
 
 // Hours the user selected for a specific date (weekday bucket vs weekend).
+// Clamped to the Academic Preferences min/max daily study hours when set.
 export function selectedHoursFor(profile: Profile, date: Date): number {
   const weekday = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-  if (weekday === "saturday" && (profile.saturday_study_hours ?? 0) > 0) return profile.saturday_study_hours ?? 0;
-  if (weekday === "sunday" && (profile.sunday_study_hours ?? 0) > 0) return profile.sunday_study_hours ?? 0;
-  const bucket = profile.weekday_study_hours ? weekdayStudyHours(profile.weekday_study_hours, 0) : 0;
-  if (bucket > 0) return bucket;
-  return profile.daily_goal_hours || 0;
+  let hours = profile.daily_goal_hours || 0;
+  if (weekday === "saturday" && (profile.saturday_study_hours ?? 0) > 0) hours = profile.saturday_study_hours ?? 0;
+  else if (weekday === "sunday" && (profile.sunday_study_hours ?? 0) > 0) hours = profile.sunday_study_hours ?? 0;
+  else {
+    const bucket = profile.weekday_study_hours ? weekdayStudyHours(profile.weekday_study_hours, 0) : 0;
+    if (bucket > 0) hours = bucket;
+  }
+  if (typeof profile.min_daily_study_hours === "number" && profile.min_daily_study_hours > 0) {
+    hours = Math.max(hours, profile.min_daily_study_hours);
+  }
+  if (typeof profile.max_daily_study_hours === "number" && profile.max_daily_study_hours > 0) {
+    hours = Math.min(hours, profile.max_daily_study_hours);
+  }
+  return hours;
 }

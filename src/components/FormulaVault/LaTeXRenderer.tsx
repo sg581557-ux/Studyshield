@@ -8,7 +8,7 @@ import katex from 'katex';
  * Used to decide whether user-entered formula-sheet strings should be
  * rendered by KaTeX or shown as plain text.
  */
-export function isLatexString(value: string): boolean {
+function isLatexString(value: string): boolean {
   return /\\[a-zA-Z]+|\^|_|\{[^{}]*\}/.test(value);
 }
 
@@ -45,7 +45,7 @@ function renderLatex(latex: string, displayMode: boolean): string {
   const cached = htmlCache.get(key);
   if (cached !== undefined) return cached;
 
-  let html = '';
+  let html: string;
   try {
     html = katex.renderToString(latex, { ...KATEX_OPTIONS, displayMode });
   } catch {

@@ -69,7 +69,6 @@ export default function BacklogPlanner() {
   const [preset, setPreset] = useState<{ exam?: string; subject?: string; kind?: BacklogKind; bulk?: boolean } | undefined>(undefined);
   const [editItem, setEditItem] = useState<BacklogItem | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "done">("all");
-  const [recent, setRecent] = useState<RecentBacklog[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
 
   // The whole Backlog module is scoped to the user's selected exam. Switching
@@ -77,28 +76,62 @@ export default function BacklogPlanner() {
   const activeExam = useMemo(() => backlogExamFamily(profile?.target_exam), [profile?.target_exam]);
   const activeExamLabel = EXAM_LABEL[activeExam] ?? activeExam;
 
+  // Recent quick-adds come straight from localStorage and are never written by
+  // this component, so they're derived (not state). Dismissed suggestions
+  // reset whenever the exam changes — render-phase adjustment so the reset
+  // commits with the exam switch.
+  const recent = useMemo(() => loadRecent().filter((r) => r.exam === activeExam), [activeExam]);
+  const [prevExam, setPrevExam] = useState(activeExam);
+  if (prevExam !== activeExam) {
+    setPrevExam(activeExam);
+    setDismissedSuggestions(new Set());
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try { setItems(await db.getBacklogItems(activeExam)); } catch { setItems([]); }
     finally { setLoading(false); }
   }, [activeExam]);
 
-  useEffect(() => {
-    load();
-    setRecent(loadRecent().filter((r) => r.exam === activeExam));
-    setDismissedSuggestions(new Set());
-  }, [load, activeExam]);
+  // Initial + exam-switch refetch, inlined in the effect (React's documented
+  // fetch-on-mount shape). The loading flip happens during render when the
+  // exam changes so the spinner shows immediately.
+  const [prevLoadExam, setPrevLoadExam] = useState(activeExam);
+  if (prevLoadExam !== activeExam) {
+    setPrevLoadExam(activeExam);
+    setLoading(true);
+  }
 
   useEffect(() => {
-    const add = searchParams.get("add");
-    if (add) {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await db.getBacklogItems(activeExam);
+        if (!cancelled) setItems(data);
+      } catch { if (!cancelled) setItems([]); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [activeExam]);
+
+  // Deep-link support (?add=1&kind=…&bulk=1): the URL is an external system,
+  // so this syncs form state from it during render (the React "adjusting
+  // state when a prop changes" pattern), then strips the params in an effect.
+  const urlKey = searchParams.toString();
+  const [prevUrlKey, setPrevUrlKey] = useState(urlKey);
+  if (prevUrlKey !== urlKey) {
+    setPrevUrlKey(urlKey);
+    if (searchParams.get("add")) {
       const kind = (searchParams.get("kind") as BacklogKind | null) ?? undefined;
       const bulk = searchParams.get("bulk") === "1";
       setPreset(bulk ? { bulk: true } : kind ? { kind } : {});
       setEditItem(null);
       setSheetOpen(true);
-      setSearchParams({}, { replace: true });
     }
+  }
+
+  useEffect(() => {
+    if (searchParams.get("add")) setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
   const suggestions = useMemo(

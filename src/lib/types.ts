@@ -108,6 +108,71 @@ export interface Profile {
   break_min?: number | null;
   days_off?: string[] | null;
   productive_slots?: string[] | null;
+  // Settings (written by SettingsPage.tsx "Save All Changes").
+  school_start?: string | null;
+  school_end?: string | null;
+  revision_frequency?: string | null;
+  difficulty_preference?: string | null;
+  ai_planning_style?: string | null;
+  notification_prefs?: Record<string, boolean> | null;
+  reminder_timings?: string[] | null;
+  timezone?: string | null;
+  language?: string | null;
+  focus_goal?: string | null;
+  backlog_strategy?: string | null;
+  daily_question_target?: number | null;
+  daily_lecture_target?: number | null;
+  weak_subjects?: string[] | null;
+  strong_subjects?: string[] | null;
+  // Coaching flow v2 (new onboarding interview).
+  // class_mode: "live" | "recorded" | null (null = self-study / not set).
+  class_mode?: string | null;
+  // Weekly live-class blocks — the AI Planner blocks these hours.
+  class_schedule?: ClassScheduleEntry[] | null;
+  // Recorded lectures: duration (min) and count scheduled per day.
+  lecture_duration?: number | null;
+  lectures_per_day?: number | null;
+  // Onboarding v3 fields (migration 20260805160000).
+  // Academic stream: science_pcm | science_pcb | science_pcmb | commerce |
+  // arts | diploma | other.
+  // (profile.stream already exists as a legacy column — kept here once.)
+  // Multi-select goals: school exams (cbse/icse/state_board) + competitive
+  // exams (jee-main, jee-advanced, neet-ug, cuet-ug, nda, olympiad,
+  // upsc-foundation, ssc-cgl, gate, cat, other).
+  academic_goals?: string[] | null;
+  // Primary productive window (planner schedules hard tasks here):
+  // early_morning | morning | afternoon | evening | night | night_owl.
+  productive_time?: string | null;
+  // Desired hours of sleep per night.
+  desired_sleep_hours?: number | null;
+  // Weekly mock tests (0–7+).
+  tests_per_week?: number | null;
+  // Days school is attended ("monday"…"sunday").
+  school_days?: string[] | null;
+  // Days the student plans to study.
+  study_days?: string[] | null;
+  // online | offline | hybrid | self_study.
+  coaching_mode?: string | null;
+  // Academic Preferences (Settings page — migration 20260806120000).
+  // School holidays (weekday names, days school is closed).
+  school_holidays?: string[] | null;
+  // Night Owl study mode toggle.
+  night_owl_mode?: boolean | null;
+  // AI Planner caps: max/min study hours per day.
+  max_daily_study_hours?: number | null;
+  min_daily_study_hours?: number | null;
+  // Practice % of the practice+revision pool (default 75).
+  practice_revision_ratio?: number | null;
+  // Task-type priority weights: {backlog, lecture, practice, mock} summing 100.
+  priority_weights?: Record<string, number> | null;
+  // Mock test preferences.
+  test_duration_min?: number | null;
+  preferred_test_day?: string | null;
+  mock_analysis_prefs?: Record<string, boolean> | null;
+  // Personalization.
+  accent_color?: string | null;
+  time_format?: string | null; // "12h" | "24h"
+  date_format?: string | null; // "dmy" | "mdy" | "ymd"
   // Timestamps.
   created_at: string | null; updated_at?: string | null;
   theme?: "light" | "dark" | "system" | null;
@@ -223,11 +288,53 @@ export interface BacklogItem {
   difficulty?: BacklogDifficulty | null;
   estimated_minutes?: number | null;
   updated_at?: string | null;
+  // Onboarding v3 per-chapter detail (migration 20260805160000).
+  lecture_status?: string | null;   // not_started | in_progress | completed
+  revision_level?: number | null;   // revision rounds needed, 0–3
+  confidence?: number | null;       // 1 (weak) … 5 (strong)
+  // Academic Preferences (migration 20260806120000).
+  pending_tests?: number;           // pending mock tests
+}
+
+// Patch shape for the Academic Preferences "Subjects & Chapters" editor —
+// writes user_chapters + mirrors onto backlog_items when a row exists
+// (and creates one when any backlog counter is set).
+export interface ChapterProgressPatch {
+  exam: string;
+  subject: string;
+  chapter: string;
+  status?: ChapterStatus;
+  lectures_remaining?: number;
+  questions_remaining?: number;
+  revision_pending?: number;
+  confidence?: number;
+  module_pct?: number;      // 0–100
+  dpp_pending?: number;
+  pyq_pending?: number;
+  revision_level?: number;  // 0–3
+  pending_tests?: number;
+  difficulty?: BacklogDifficulty | null;
+  priority?: Priority;
+}
+
+// AI Planner task-type priority weights (sums to 100).
+export interface PriorityWeights {
+  backlog: number;
+  lecture: number;
+  practice: number;
+  mock: number;
 }
 
 export interface DailyPlanInputsInput {
   plan_date: string; was_school_day: boolean; study_hours: number;
   energy_level: EnergyLevel; exam_tomorrow: boolean;
+}
+
+// One weekly class block (live classes). Day is lowercase long name ("monday").
+export interface ClassScheduleEntry {
+  day: string;
+  start: string; // "HH:MM" 24h
+  end: string;   // "HH:MM" 24h
 }
 
 // Onboarding v2 — every answer is stored (see the onboarding_v2 migration).
@@ -239,6 +346,11 @@ export interface OnboardingBacklog {
   module_remaining: number;
   pending_pyqs: number;
   revision_pending: number;
+  // Onboarding v3 — per-chapter backlog detail (migration 20260805160000).
+  lecture_status?: string;      // not_started | in_progress | completed
+  module_pct?: number;          // module questions solved, 0–100
+  revision_level?: number;      // revision rounds needed, 0–3
+  confidence?: number;          // 1 (weak) … 5 (strong)
 }
 
 export interface OnboardingInput {
@@ -252,6 +364,13 @@ export interface OnboardingInput {
   current_level: string;
   coaching: string;
   coaching_other: string;
+  coaching_type: string;
+  coaching_name: string;
+  class_mode: string;
+  class_schedule: ClassScheduleEntry[];
+  lecture_duration: number;
+  lectures_per_day: number;
+  preferred_study_time: string;
   daily_goal_hours: number;
   wake_up_time: string;
   sleep_time: string;
@@ -273,6 +392,18 @@ export interface OnboardingInput {
   break_min: number;
   days_off: string[];
   productive_slots: string[];
+  // Onboarding v3 — stream, goals, school schedule, sleep & tests
+  // (migration 20260805160000).
+  stream: string;
+  academic_goals: string[];
+  board: string;
+  productive_time: string;
+  desired_sleep_hours: number;
+  tests_per_week: number;
+  school_days: string[];
+  school_start: string;
+  school_end: string;
+  study_days: string[];
 }
 
 export interface BacklogDetailInput {

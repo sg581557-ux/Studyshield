@@ -237,12 +237,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
-    const { context, messages, language, stream } = body as {
+    const { context, messages, language } = body as {
       context: Record<string, unknown>;
       messages: ChatMessage[];
       language?: string;
-      /** When true, the reply is returned as an SSE stream (event: delta / done / error). */
-      stream?: boolean;
     };
 
     if (!context || !Array.isArray(messages) || messages.length === 0) {
@@ -259,17 +257,38 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Fetch memories and the stored language preference in parallel —
+    // both are DB round-trips that would otherwise delay the first token.
     let memories: MemoryRow[] = [];
-    try {
-      const { data, error } = await supabase
-        .from("mentor_memory")
-        .select("category, key, value, importance")
-        .order("importance", { ascending: false })
-        .limit(40);
-      if (!error && Array.isArray(data)) memories = data as MemoryRow[];
-    } catch (e) {
-      console.error("[mentor-chat] memory fetch failed", e);
-    }
+    let storedPreference: string | null = null;
+    await Promise.all([
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from("mentor_memory")
+            .select("category, key, value, importance")
+            .order("importance", { ascending: false })
+            .limit(40);
+          if (!error && Array.isArray(data)) memories = data as MemoryRow[];
+        } catch (e) {
+          console.error("[mentor-chat] memory fetch failed", e);
+        }
+      })(),
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from("mentor_memory")
+            .select("value")
+            .eq("category", "preference")
+            .eq("key", "language_preference")
+            .limit(1)
+            .maybeSingle();
+          storedPreference = data?.value ?? null;
+        } catch (e) {
+          console.error("[mentor-chat] failed to load language preference", e);
+        }
+      })(),
+    ]);
 
     const now = new Date().toISOString();
     const LANGUAGE_NAMES: Record<string, string> = {
@@ -290,7 +309,7 @@ Deno.serve(async (req: Request) => {
       if (!v) return null;
       if (LANGUAGE_NAME_TO_CODE[v]) return LANGUAGE_NAME_TO_CODE[v];
       if (v.length <= 2) {
-        for (const [name, code] of Object.entries(LANGUAGE_NAME_TO_CODE)) {
+        for (const [, code] of Object.entries(LANGUAGE_NAME_TO_CODE)) {
           if (code === v) return code;
         }
       }
@@ -312,20 +331,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 1. Load a previously saved language preference (stored in mentor_memory).
-    let preference: string | null = null;
-    try {
-      const { data } = await supabase
-        .from("mentor_memory")
-        .select("value")
-        .eq("category", "preference")
-        .eq("key", "language_preference")
-        .limit(1)
-        .maybeSingle();
-      preference = normalizeLangCode(data?.value);
-    } catch (e) {
-      console.error("[mentor-chat] failed to load language preference", e);
-    }
+    // 1. Use the language preference already fetched in parallel above.
+    let preference: string | null = normalizeLangCode(storedPreference);
 
     // 2. A fresh explicit preference overrides the stored one, and persists.
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
@@ -412,133 +419,8 @@ Deno.serve(async (req: Request) => {
     console.log(
       `[mentor-chat] user=${user.id} provider=${openRouterKey ? "openrouter" : "openai"} ` +
       `model=${String(payload.model)} messages=${chatMessages.length} contextChars=${contextBlock.length} ` +
-      `lastUser="${lastUser.slice(0, 120)}"${stream ? " (stream)" : ""}`
+      `lastUser="${lastUser.slice(0, 120)}"`
     );
-
-    // ============================================================
-    // Streaming path — Voice Mode. Deltas are forwarded as SSE so the
-    // client can start speaking before the reply finishes.
-    // ============================================================
-    if (stream === true) {
-      const sseHeaders = {
-        ...corsHeaders,
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      };
-
-      const body = new ReadableStream({
-        async start(controller) {
-          const encoder = new TextEncoder();
-          const send = (event: string, data: Record<string, unknown>): void => {
-            try {
-              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-            } catch {
-              // controller already closed
-            }
-          };
-          let reply = "";
-          try {
-            const llmRes = await fetch(endpoint, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({ ...payload, stream: true }),
-              signal: req.signal,
-            });
-
-            if (!llmRes.ok) {
-              const errText = await llmRes.text();
-              const summary = providerErrorSummary(llmRes.status, errText);
-              console.error(`[mentor-chat] LLM request failed (stream) status=${llmRes.status} body="${errText.slice(0, 500)}"`);
-              const kind = llmRes.status === 429
-                ? "rate_limited"
-                : llmRes.status === 401 || llmRes.status === 403
-                  ? "llm_auth"
-                  : llmRes.status === 404
-                    ? "llm_bad_request"
-                    : "llm_error";
-              const message = llmRes.status === 429
-                ? "The AI provider is rate-limiting requests. Wait a moment and retry."
-                : llmRes.status === 401 || llmRes.status === 403
-                  ? "The AI provider rejected the API key (invalid, expired, or insufficient balance)."
-                  : llmRes.status === 404
-                    ? `The AI provider returned "model not found" for model "${String(payload.model)}".`
-                    : "The AI provider returned an error. Please try again.";
-              send("error", { error: kind, message, details: summary });
-              return;
-            }
-
-            if (!llmRes.body) {
-              send("error", { error: "llm_error", message: "The AI provider returned an empty stream." });
-              return;
-            }
-
-            // Forward LLM SSE deltas → our `event: delta` events.
-            const reader = llmRes.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
-              for (const line of lines) {
-                const t = line.trim();
-                if (!t.startsWith("data:")) continue;
-                const raw = t.slice(5).trim();
-                if (!raw || raw === "[DONE]") continue;
-                try {
-                  const j = JSON.parse(raw);
-                  const delta = j?.choices?.[0]?.delta?.content ?? "";
-                  if (typeof delta === "string" && delta.length > 0) {
-                    reply += delta;
-                    send("delta", { text: delta });
-                  }
-                } catch {
-                  // partial/invalid JSON line — skip
-                }
-              }
-            }
-
-            reply = reply.trim();
-            if (!reply) {
-              console.error("[mentor-chat] empty reply from provider (stream)");
-              send("error", { error: "llm_error", message: "The AI provider returned an empty reply. Please try again." });
-              return;
-            }
-
-            // Long-term memory extraction — non-fatal, best-effort.
-            try {
-              const saved = await extractAndSaveMemories(supabase, {
-                endpoint, headers, payload, user: user.id, memories,
-                contextBlock, trimmed,
-              });
-              if (saved > 0) console.log(`[mentor-chat] saved ${saved} memory row(s) user=${user.id} (stream)`);
-            } catch (err) {
-              console.error("[mentor-chat] memory extraction failed (stream)", err);
-            }
-
-            console.log(`[mentor-chat] ok (stream) user=${user.id} replyChars=${reply.length}`);
-            send("done", { reply, language: effectiveLang ?? null });
-          } catch (err) {
-            // Client disconnected (barge-in aborts the fetch) — nothing to send.
-            if (req.signal.aborted) return;
-            console.error("[mentor-chat] stream failed", err);
-            send("error", { error: "stream_failed", message: "The response stream failed. Please try again." });
-          } finally {
-            try {
-              controller.close();
-            } catch {
-              // already closed
-            }
-          }
-        },
-      });
-
-      return new Response(body, { status: 200, headers: sseHeaders });
-    }
 
     const llmRes = await fetch(endpoint, {
       method: "POST",

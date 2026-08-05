@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shuffle, Eye, ArrowRight, X, Lightbulb, Filter, Target, Play, Settings2 } from 'lucide-react';
 import type { Formula, FormulaSubject } from '../../types';
@@ -83,12 +83,15 @@ export function QuickRevisionMode({
     return list;
   }, [examPool, scope, subject, chapter]);
 
-  // Keep the deck position valid whenever the pool changes.
-  useEffect(() => {
+  // Keep the deck position valid whenever the pool changes. Render-phase
+  // adjustment (React's "adjusting state when a prop changes" pattern) so the
+  // clamp lands in the same commit as the new pool.
+  const [poolLen, setPoolLen] = useState(pool.length);
+  if (pool.length !== poolLen) {
+    setPoolLen(pool.length);
     setCurrentIndex(pool.length > 0 ? Math.min(currentIndex, pool.length - 1) : 0);
     setShowAnswer(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool]);
+  }
 
   const handleScopeChange = (s: RevisionScope) => {
     setScope(s);

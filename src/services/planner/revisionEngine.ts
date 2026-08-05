@@ -67,8 +67,8 @@ export function getRevisionCandidates(
     const pending = uc.revision_pending ?? 0;
     const isOldChapter = uc.status === "completed" || uc.status === "mastered";
 
-    let urgency = 0;
-    let reason = "";
+    let urgency: number;
+    let reason: string;
     let revisionNumber = Math.max(1, n);
 
     if (!isOldChapter && pending > 0) {
