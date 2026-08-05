@@ -412,39 +412,30 @@ export function computeTimeAllocation(
 }
 
 /**
- * Build the "New Work" tasks for online coaching.
- * Only uses the user's current ongoing chapter (in_progress/started).
+ * Guaranteed lecture tasks: at least 2/day from the user's ongoing chapters
+ * (up to 2 lectures per chapter) plus any backlog lectures (missed lectures
+ * to catch up on). Budget = the lecture reserve reserved before the category
+ * allocation, so practice/backlog budgets can never starve lectures.
  */
-function buildNewWorkTasks(
+function buildGuaranteedLectures(
   activeChapters: ActiveChapter[],
+  pool: BacklogPool,
   budget: number,
   lecMin: number,
-  dppMin: number,
-  moduleMin: number,
-  pyqMin: number,
   chapterRank: { subject: string; chapter: string; score: number }[],
   recovery: RecoveryItem[],
   examTomorrow: boolean,
 ): PlannedTask[] {
   const tasks: PlannedTask[] = [];
   let used = 0;
-
-  // Only use the current ongoing chapters (in_progress/started)
-  const ongoing = activeChapters.filter((ac) => ac.inClassNow);
-  if (ongoing.length === 0) return tasks;
-
-  const ac = ongoing[0]; // The current top chapter
   const canFit = (min: number) => used + min <= budget + TOLERANCE_MIN;
 
-  // 1. Today's lectures — minimum 2/day. Every ongoing chapter gets up to two
-  // lectures (watch + practice same chapter) while the new-work budget allows;
-  // backlog lectures are handled separately in buildBacklogTasks.
-  let lectureCount = 0;
-  for (const oc of ongoing) {
-    if (lectureCount >= 4 || !canFit(lecMin)) break;
+  // 1. Ongoing chapters (started/in_progress) — up to 2 lectures each.
+  for (const oc of activeChapters.filter((ac) => ac.inClassNow)) {
+    if (!canFit(lecMin)) break;
     const perChapter = Math.min(2, oc.uc.lectures_remaining ?? 0);
     for (let i = 0; i < perChapter; i++) {
-      if (lectureCount >= 4 || !canFit(lecMin)) break;
+      if (!canFit(lecMin)) break;
       const ps = computeTaskPriority("lecture", oc.subject, oc.chapter, chapterRank, recovery, examTomorrow);
       tasks.push({
         title: `Lecture: ${oc.subject} — ${oc.chapter}`,
@@ -456,9 +447,53 @@ function buildNewWorkTasks(
       });
       used += lecMin;
       oc.uc.lectures_remaining = Math.max(0, (oc.uc.lectures_remaining ?? 0) - 1);
-      lectureCount++;
     }
   }
+
+  // 2. Backlog lectures (missed lectures) — nearest deadline first.
+  const backlogLectures = [...pool.lectures].sort((a, b) => (daysUntil(a.due_date) ?? 999) - (daysUntil(b.due_date) ?? 999));
+  for (const b of backlogLectures) {
+    if (!canFit(lecMin)) break;
+    if ((b.pending_lectures ?? 0) <= 0) continue;
+    tasks.push({
+      title: `Backlog lecture: ${b.subject ?? ""} ${b.chapter ? `— ${b.chapter}` : ""}`.trim(),
+      subject: b.subject ?? null, type: "lecture", estimated_minutes: lecMin,
+      priority: "high", chapter: b.chapter ?? null, source: "backlog",
+      priority_score: 8.6,
+      tracker_ref: { backlog_id: b.id, kind: "lecture", auto_decrement: true, decrement: 1 },
+      reason: "Missed lecture from backlog — catching up keeps you in sync with class.",
+    });
+    used += lecMin;
+    b.pending_lectures = Math.max(0, (b.pending_lectures ?? 0) - 1);
+  }
+
+  return tasks;
+}
+
+/**
+ * Build the "New Work" tasks for online coaching.
+ * Lectures are handled separately by buildGuaranteedLectures — this only
+ * covers module questions, DPPs and PYQs for the top ongoing chapter.
+ */
+function buildNewWorkTasks(
+  activeChapters: ActiveChapter[],
+  budget: number,
+  dppMin: number,
+  moduleMin: number,
+  pyqMin: number,
+  chapterRank: { subject: string; chapter: string; score: number }[],
+  recovery: RecoveryItem[],
+  examTomorrow: boolean,
+): PlannedTask[] {
+  const tasks: PlannedTask[] = [];
+  let used = 0;
+
+  // Only use the current ongoing chapter (in_progress/started)
+  const ongoing = activeChapters.filter((ac) => ac.inClassNow);
+  if (ongoing.length === 0) return tasks;
+
+  const ac = ongoing[0]; // The current top chapter
+  const canFit = (min: number) => used + min <= budget + TOLERANCE_MIN;
 
   // 2. Today's module (if questions remaining)
   if ((ac.uc.questions_remaining ?? 0) > 0 && canFit(moduleMin)) {
@@ -856,13 +891,6 @@ export async function generateCoachingPlan(input: CoachingPlannerInput): Promise
   // Determine if backlog exists
   const hasBacklog = pool.pendingLectures > 0 || pool.pendingDpps > 0 || pool.pendingModuleQs > 0 || pool.lowPriority.length > 0;
 
-  // Compute time allocation per category
-  const allocation = computeTimeAllocation(coachingType, schedulableMinutes, hasBacklog, {
-    practiceRatio: profile.practice_revision_ratio,
-    weights: (profile.priority_weights ?? null) as PriorityWeights | null,
-  });
-  console.info("[coaching-planner] allocation", { coachingType, hasBacklog, allocation });
-
   // Durations
   const lecMin = predictedDuration("lecture", stats);
   const pyqMin = predictedDuration("pyq", stats);
@@ -875,6 +903,26 @@ export async function generateCoachingPlan(input: CoachingPlannerInput): Promise
   const activeChapters = getActiveChapters(userChapters, backlog, recovery, profile);
   const chapterRank = rankChapters(userChapters, backlog, recovery, profile);
   const revisionCandidates: RevisionCandidate[] = getRevisionCandidates(userChapters, stats, 8);
+
+  // ===== LECTURE GUARANTEE (minimum 2/day) =====
+  // Lecture slots are reserved BEFORE the category allocation, so practice and
+  // backlog budgets can never starve lectures. Target = 2 for ongoing chapters
+  // + 1 per backlog lecture (missed lectures), capped by what fits the day.
+  const isLectureMode = (coachingType === "online" || coachingType === "self_study") && profile.class_mode !== "recorded";
+  const ongoingLectures = activeChapters.filter((ac) => ac.inClassNow && (ac.uc.lectures_remaining ?? 0) > 0).length;
+  const maxLectureSlots = Math.floor(schedulableMinutes / lecMin);
+  const lectureTarget = isLectureMode && (ongoingLectures > 0 || pool.lectures.length > 0) && maxLectureSlots > 0
+    ? Math.min(2 + pool.lectures.length, maxLectureSlots)
+    : 0;
+  const lectureReserve = lectureTarget * lecMin;
+  if (lectureTarget > 0) warnings.push(`Lecture guarantee active — ${lectureTarget} lecture${lectureTarget > 1 ? "s" : ""} scheduled today.`);
+
+  // Compute time allocation per category (on the time left after lectures)
+  const allocation = computeTimeAllocation(coachingType, Math.max(60, schedulableMinutes - lectureReserve), hasBacklog, {
+    practiceRatio: profile.practice_revision_ratio,
+    weights: (profile.priority_weights ?? null) as PriorityWeights | null,
+  });
+  console.info("[coaching-planner] allocation", { coachingType, hasBacklog, lectureTarget, lectureReserve, allocation });
 
   const tasks: PlannedTask[] = [];
   let scheduled = 0;
@@ -899,10 +947,22 @@ export async function generateCoachingPlan(input: CoachingPlannerInput): Promise
     warnings.push("Weekly test scheduled — treat it like the real exam.");
   }
 
+  // ===== GUARANTEED LECTURES (min 2/day + backlog catch-up) =====
+  if (lectureReserve > 0) {
+    const lectureTasks = buildGuaranteedLectures(
+      activeChapters, pool, lectureReserve, lecMin,
+      chapterRank, recovery, examTomorrow,
+    );
+    for (const t of lectureTasks) {
+      if (scheduled + t.estimated_minutes > schedulableMinutes + TOLERANCE_MIN) break;
+      place(t);
+    }
+  }
+
   // ===== NEW WORK (online only) =====
   if (coachingType === "online" && allocation.newWork > 0) {
     const newWorkTasks = buildNewWorkTasks(
-      activeChapters, allocation.newWork, lecMin, dppMin, moduleMin, pyqMin,
+      activeChapters, allocation.newWork, dppMin, moduleMin, pyqMin,
       chapterRank, recovery, examTomorrow,
     );
     for (const t of newWorkTasks) {
