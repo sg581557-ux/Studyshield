@@ -1083,9 +1083,9 @@ export async function onTaskCompleted(task: PlanTask): Promise<void> {
           if (ref.field === "lectures_remaining") {
             let remaining = Math.max(0, (uc.lectures_remaining ?? 0) - decrement);
             // Chapter still being studied (started/in_progress) with no question
-            // work yet: keep a lecture queued so the planner schedules one per
-            // day while the user is doing the chapter.
-            if (remaining === 0 && (uc.status === "started" || uc.status === "in_progress") && (uc.questions_remaining ?? 0) <= 0) remaining = 1;
+            // work yet: keep two lectures queued so the planner schedules its
+            // 2/day minimum while the user is doing the chapter.
+            if (remaining < 2 && (uc.status === "started" || uc.status === "in_progress") && (uc.questions_remaining ?? 0) <= 0) remaining = 2;
             patch.lectures_remaining = remaining;
           } else if (ref.field === "questions_remaining") patch.questions_remaining = Math.max(0, (uc.questions_remaining ?? 0) - decrement);
           else if (ref.field === "revision_pending") patch.revision_pending = Math.max(0, (uc.revision_pending ?? 0) - decrement);

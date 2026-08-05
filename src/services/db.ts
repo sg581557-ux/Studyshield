@@ -541,14 +541,15 @@ export const db = {
       if (existing.error) { console.error("[db.upsertUserChapter] fetch", existing.error); throw existing.error; }
       const cur = existing.data as UserChapter | null;
       // Marking a chapter started/in_progress means it is being studied now —
-      // seed one lecture so the planner schedules it (column default is 0).
+      // seed two lectures so the planner schedules its 2/day minimum
+      // (column default is 0).
       const seedLecture = active
         && (cur?.lectures_remaining ?? 0) <= 0 && (cur?.questions_remaining ?? 0) <= 0 && (cur?.revision_pending ?? 0) <= 0;
       const payload: Record<string, unknown> = {
         exam: aliasExamId(row.exam), subject: row.subject, chapter: row.chapter,
         status, confidence: row.confidence ?? 3, updated_at: new Date().toISOString(),
       };
-      if (seedLecture) payload.lectures_remaining = 1;
+      if (seedLecture) payload.lectures_remaining = 2;
       const { data, error } = await c.from("user_chapters")
         .upsert(payload, { onConflict: "user_id,exam,subject,chapter" })
         .select("*").maybeSingle();
@@ -582,12 +583,12 @@ export const db = {
       const ucPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (patch.status) ucPatch.status = patch.status;
       if (patch.lectures_remaining !== undefined) ucPatch.lectures_remaining = Math.max(0, Math.round(patch.lectures_remaining || 0));
-      // Seeding: a chapter marked started/in_progress with no counters gets one
-      // lecture so the planner schedules it (column default is 0).
+      // Seeding: a chapter marked started/in_progress with no counters gets two
+      // lectures so the planner schedules its 2/day minimum (column default is 0).
       const activeStatus = patch.status === "started" || patch.status === "in_progress";
       const noCounters = (uc?.lectures_remaining ?? 0) <= 0 && (uc?.questions_remaining ?? 0) <= 0 && (uc?.revision_pending ?? 0) <= 0;
       if (patch.status && activeStatus && patch.lectures_remaining === undefined && noCounters) {
-        ucPatch.lectures_remaining = 1;
+        ucPatch.lectures_remaining = 2;
       }
       if (patch.questions_remaining !== undefined) ucPatch.questions_remaining = Math.max(0, Math.round(patch.questions_remaining || 0));
       if (patch.revision_pending !== undefined) ucPatch.revision_pending = Math.max(0, Math.round(patch.revision_pending || 0));
@@ -606,7 +607,7 @@ export const db = {
         const { error } = await c.from("user_chapters").insert({
           exam: examKey, subject, chapter,
           status: patch.status ?? "not_started",
-          lectures_remaining: lectureDefault ? 1 : Math.max(0, Math.round(patch.lectures_remaining ?? 0)),
+          lectures_remaining: lectureDefault ? 2 : Math.max(0, Math.round(patch.lectures_remaining ?? 0)),
           questions_remaining: Math.max(0, Math.round(patch.questions_remaining ?? 0)),
           revision_pending: Math.max(0, Math.round(patch.revision_pending ?? 0)),
           confidence: Math.max(1, Math.min(5, Math.round(patch.confidence ?? 3))),
