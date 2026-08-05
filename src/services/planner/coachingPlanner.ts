@@ -429,26 +429,31 @@ function buildNewWorkTasks(
   const tasks: PlannedTask[] = [];
   let used = 0;
 
-  // Only use the current ongoing chapter (in_progress/started)
+  // Only use the current ongoing chapters (in_progress/started)
   const ongoing = activeChapters.filter((ac) => ac.inClassNow);
   if (ongoing.length === 0) return tasks;
 
-  const ac = ongoing[0]; // The current ongoing chapter
+  const ac = ongoing[0]; // The current top chapter
   const canFit = (min: number) => used + min <= budget + TOLERANCE_MIN;
 
-  // 1. Today's lecture (if lectures remaining)
-  if ((ac.uc.lectures_remaining ?? 0) > 0 && canFit(lecMin)) {
-    const ps = computeTaskPriority("lecture", ac.subject, ac.chapter, chapterRank, recovery, examTomorrow);
+  // 1. Today's lectures — every ongoing chapter gets one while the budget
+  // allows (capped at 2/day to pace, not dump, new content).
+  let lectureCount = 0;
+  for (const oc of ongoing) {
+    if (lectureCount >= 2 || !canFit(lecMin)) break;
+    if ((oc.uc.lectures_remaining ?? 0) <= 0) continue;
+    const ps = computeTaskPriority("lecture", oc.subject, oc.chapter, chapterRank, recovery, examTomorrow);
     tasks.push({
-      title: `Lecture: ${ac.subject} — ${ac.chapter}`,
-      subject: ac.subject, type: "lecture", estimated_minutes: lecMin,
-      priority: "high", chapter: ac.chapter, source: "new_work",
+      title: `Lecture: ${oc.subject} — ${oc.chapter}`,
+      subject: oc.subject, type: "lecture", estimated_minutes: lecMin,
+      priority: "high", chapter: oc.chapter, source: "new_work",
       priority_score: ps + 0.5,
-      tracker_ref: { user_chapter_id: ac.uc.id, field: "lectures_remaining", decrement: 1, progress_flag: "lectureCompleted" },
+      tracker_ref: { user_chapter_id: oc.uc.id, field: "lectures_remaining", decrement: 1, progress_flag: "lectureCompleted" },
       reason: "Today's lecture for your current chapter — staying in sync with class.",
     });
     used += lecMin;
-    ac.uc.lectures_remaining = Math.max(0, (ac.uc.lectures_remaining ?? 0) - 1);
+    oc.uc.lectures_remaining = Math.max(0, (oc.uc.lectures_remaining ?? 0) - 1);
+    lectureCount++;
   }
 
   // 2. Today's module (if questions remaining)

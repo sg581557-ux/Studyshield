@@ -1080,8 +1080,14 @@ export async function onTaskCompleted(task: PlanTask): Promise<void> {
         const uc = currentChapters.find((c) => c.id === ref.user_chapter_id);
         if (uc) {
           const decrement = ref.decrement ?? 1;
-          if (ref.field === "lectures_remaining") patch.lectures_remaining = Math.max(0, (uc.lectures_remaining ?? 0) - decrement);
-          else if (ref.field === "questions_remaining") patch.questions_remaining = Math.max(0, (uc.questions_remaining ?? 0) - decrement);
+          if (ref.field === "lectures_remaining") {
+            let remaining = Math.max(0, (uc.lectures_remaining ?? 0) - decrement);
+            // Chapter still being studied (started/in_progress) with no question
+            // work yet: keep a lecture queued so the planner schedules one per
+            // day while the user is doing the chapter.
+            if (remaining === 0 && (uc.status === "started" || uc.status === "in_progress") && (uc.questions_remaining ?? 0) <= 0) remaining = 1;
+            patch.lectures_remaining = remaining;
+          } else if (ref.field === "questions_remaining") patch.questions_remaining = Math.max(0, (uc.questions_remaining ?? 0) - decrement);
           else if (ref.field === "revision_pending") patch.revision_pending = Math.max(0, (uc.revision_pending ?? 0) - decrement);
           if (Object.keys(progressPatch).length > 0) patch.progress = progressPatch;
           await db.updateUserChapterProgress(subject, chapter, patch as Partial<UserChapter> & { progress?: Record<string, unknown> });
