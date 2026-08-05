@@ -712,7 +712,8 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
     pick: () => { subject: string; chapter: string; uc: UserChapter; bl: BacklogItem | null } | null;
     title: (p: { subject: string; chapter: string; bl: BacklogItem | null }) => string;
     tracker: (p: { subject: string; chapter: string; uc: UserChapter; bl: BacklogItem | null }) => Record<string, unknown> | null;
-  }[] = [
+  }[  ] = [
+    { kind: "lecture", type: "lecture", dur: lecMin, allowed: true, repeat: false, reason: "New chapter — one lecture today keeps syllabus pace without overload.", pick: () => pickGeneric("lecture", (u) => lecturesPlanned < TODAY_LECTURES_CAP + 1 && (u.lectures_remaining ?? 0) > 0, false), title: (p) => `Lecture: ${p.subject} — ${p.chapter}`, tracker: (p) => ({ user_chapter_id: p.uc.id, field: "lectures_remaining", decrement: 1, progress_flag: "lectureCompleted" }) },
     { kind: "revision", type: "revision", dur: revMin, allowed: true, repeat: false, reason: "Extra spaced revision — cementing what's already learned.", pick: () => pickGeneric("revision", (u) => (u.revision_pending ?? 0) > 0, false), title: (p) => `Revision: ${p.subject} — ${p.chapter}`, tracker: (p) => ({ user_chapter_id: p.uc.id, field: "revision_pending", decrement: 1, progress_flag: "revision1" }) },
     { kind: "weak", type: "practice", dur: Math.round(moduleMin * 0.8), allowed: true, repeat: false, reason: "Weak chapter — targeted practice closes the gap fastest.", pick: () => { const u = userChapters.find((c) => !fillUsed.has(`weak|${c.subject}|${c.chapter}`) && weakKeySet.has(`${c.subject}|${c.chapter}`)); return u ? { subject: u.subject, chapter: u.chapter, uc: u, bl: backlogOf(u) } : null; }, title: (p) => `Weak chapter practice: ${p.subject} — ${p.chapter}`, tracker: () => null },
     { kind: "module", type: "module", dur: moduleMin, allowed: !testWeek, repeat: false, reason: "Backlog module — another 20-question chunk keeps the backlog shrinking.", pick: () => pickGeneric("module", (u) => (backlogOf(u)?.module_questions_remaining ?? 0) > 0, false), title: (p) => `Backlog Module: ${p.subject} — ${p.chapter} (${Math.min(MODULE_CHUNK_QS, p.bl?.module_questions_remaining ?? 0)} Qs)`, tracker: (p) => ({ backlog_id: p.bl!.id, kind: "module", auto_decrement: true, decrement: Math.min(MODULE_CHUNK_QS, p.bl?.module_questions_remaining ?? 0), user_chapter_id: p.uc.id, field: "questions_remaining", progress_flag: "moduleQuestionsCompleted" }) },
@@ -749,6 +750,7 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
       }
       if (src.kind === "revision") revisionCount++;
       if (src.kind === "pyq") pyqPlanned = true;
+      if (src.kind === "lecture") lecturesPlanned++;
       fillProgress = true;
     }
   }

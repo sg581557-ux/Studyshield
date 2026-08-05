@@ -48,8 +48,10 @@ export function revisionDue(uc: UserChapter): boolean {
   if (uc.status === "completed" || uc.status === "mastered") {
     return revisionNumberDue(uc) > 0;
   }
+  // In-progress chapters are only revision-due when the app explicitly
+  // queued revisions (revision_pending) — an in-progress chapter with no
+  // pending work is still being learned, not revised.
   if (uc.revision_pending && uc.revision_pending > 0) return true;
-  if (uc.status === "revision_pending" || uc.status === "in_progress" || uc.status === "started") return true;
   return false;
 }
 
