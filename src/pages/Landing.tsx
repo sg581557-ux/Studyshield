@@ -33,43 +33,79 @@ const AIMentorShowcase = lazy(() => import('./components/AIMentorShowcase'));
 // ——— Hero — redesigned: editorial, warm amber, no generic blue/purple
 const Hero = () => {
   return (
-    <section className="relative overflow-hidden bg-[#050507] pt-32 pb-12 sm:pt-40 sm:pb-20">
-      {/* Warm ambient */}
+    <section className="relative flex min-h-[100svh] items-center overflow-hidden bg-[#050507] pt-20">
+      {/* ——— Cinematic canvas ——— */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-32 left-1/2 h-[720px] w-[1200px] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,_rgba(251,146,60,0.10),_transparent_65%)] blur-[1px]" />
-        <div className="absolute top-[18%] right-[8%] h-72 w-72 rounded-full bg-amber-500/10 blur-[90px]" />
-        <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-        {/* Grid */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,_rgba(255,255,255,0.04)_1px,_transparent_1px),linear-gradient(to_bottom,_rgba(255,255,255,0.04)_1px,_transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_70%,transparent_110%)]" />
+        {/* Slow-zoom image layer (Ken Burns) */}
+        <motion.div
+          aria-hidden
+          initial={{ scale: 1.08 }}
+          animate={{ scale: 1 }}
+          transition={{ duration: 20, ease: "easeOut", repeat: Infinity, repeatType: "reverse" }}
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              "radial-gradient(1200px 600px at 50% -10%, rgba(251,146,60,0.18), transparent 60%), radial-gradient(900px 500px at 90% 30%, rgba(251,146,60,0.12), transparent 60%), linear-gradient(to bottom, #0a0a0c, #050507 55%)",
+          }}
+        />
+        {/* Anamorphic light leak */}
+        <div className="absolute -left-1/4 top-1/2 h-[1px] w-[150%] -translate-y-1/2 rotate-[-8deg] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent blur-[1px] opacity-60" />
+        <div className="absolute left-1/2 top-1/2 h-[420px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-500/[0.06] blur-[80px]" />
+        {/* Vignette + film grain */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_42%,_rgba(0,0,0,0.72)_88%)]" />
+        <div className="absolute inset-0 opacity-[0.035] mix-blend-soft-light" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")` }} />
+        {/* Letterbox */}
+        <div className="absolute inset-x-0 top-0 h-[18px] bg-black sm:h-[22px]" />
+        <div className="absolute inset-x-0 bottom-0 h-[18px] bg-black sm:h-[22px]" />
+        {/* Top/bottom hairline */}
+        <div className="absolute inset-x-0 top-[18px] h-px bg-white/10 sm:top-[22px]" />
+        <div className="absolute inset-x-0 bottom-[18px] h-px bg-white/10 sm:bottom-[22px]" />
       </div>
 
-      <div className="relative mx-auto max-w-7xl px-6">
-        {/* Eyebrow */}
+      <div className="relative mx-auto max-w-7xl px-6 py-10 sm:py-14">
+        {/* Cinematic chrome — REC + timecode + slate */}
+        <div className="pointer-events-none absolute inset-x-6 top-2 hidden items-center justify-between text-[10px] tracking-[0.18em] text-white/40 sm:flex">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]" /> REC • STBY
+          </span>
+          <span className="font-mono">00:42:17:04 • 24FPS • 2.39:1</span>
+          <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-widest text-black">STUDYSHIELD • TAKE 01</span>
+        </div>
+
+        {/* Eyebrow — now amber on black, more filmic */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mx-auto flex w-fit items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium tracking-wide text-amber-200 backdrop-blur"
+          className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-medium tracking-[0.14em] text-white/80 backdrop-blur"
         >
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
           </span>
-          Built with JEE/NEET toppers • 12k+ active learners
+          BUILT WITH JEE/NEET TOPPERS • 12k+ ACTIVE
         </motion.div>
 
         <div className="mx-auto mt-8 max-w-4xl text-center">
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.04 }}
+            className="text-center text-[10px] tracking-[0.32em] text-white/30"
+          >
+            ANAMORPHIC • SHOT ON STUDYSHIELD • EST. 2024
+          </motion.p>
           <motion.h1
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.08 }}
-            className="text-balance font-[650] leading-[0.9] tracking-[-0.04em] text-white"
+            className="text-balance font-[850] leading-[0.88] tracking-[-0.05em] text-white [text-shadow:0_1px_0_rgba(255,255,255,0.06),0_12px_40px_rgba(0,0,0,0.6)]"
           >
-            <span className="block text-[42px] sm:text-[64px] lg:text-[78px]">Your unfair</span>
-            <span className="block text-[42px] sm:text-[64px] lg:text-[78px] font-serif font-[300] italic tracking-[-0.03em] text-amber-300">
+            <span className="block text-[44px] sm:text-[68px] lg:text-[84px]">Your unfair</span>
+            <span className="block bg-gradient-to-r from-amber-200 via-amber-300 to-orange-400 bg-clip-text text-[44px] font-serif font-[300] italic tracking-[-0.04em] text-transparent sm:text-[68px] lg:text-[84px]">
               advantage
             </span>
-            <span className="block text-[42px] sm:text-[64px] lg:text-[78px]">for JEE &amp; NEET.</span>
+            <span className="block text-[44px] font-[600] tracking-[-0.04em] text-white/90 sm:text-[68px] lg:text-[84px]">for JEE &amp; NEET.</span>
           </motion.h1>
 
           <motion.p
@@ -121,12 +157,29 @@ const Hero = () => {
           transition={{ duration: 0.8, delay: 0.32, ease: [0.16, 1, 0.3, 1] }}
           className="mx-auto mt-12 max-w-5xl"
         >
-          <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-900/40 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_80px_rgba(0,0,0,0.6)] backdrop-blur">
-            <div className="flex items-center gap-1.5 border-b border-white/5 px-4 py-3">
+          <div className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-900/40 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_80px_rgba(0,0,0,0.6)] backdrop-blur">
+            {/* Film perforations */}
+            <div className="pointer-events-none absolute inset-y-2 left-1 hidden w-5 flex-col justify-between py-2 opacity-20 sm:flex">
+              {[...Array(8)].map((_, i) => (
+                <span key={i} className="h-6 w-3 rounded-sm bg-white" />
+              ))}
+            </div>
+            <div className="pointer-events-none absolute inset-y-2 right-1 hidden w-5 flex-col justify-between py-2 opacity-20 sm:flex">
+              {[...Array(8)].map((_, i) => (
+                <span key={i} className="h-6 w-3 rounded-sm bg-white" />
+              ))}
+            </div>
+            {/* Light leak on hover */}
+            <div className="pointer-events-none absolute -inset-px opacity-0 transition duration-700 group-hover:opacity-100">
+              <div className="absolute -left-1/2 top-0 h-px w-[200%] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent blur-[1px]" />
+            </div>
+            <div className="flex items-center gap-1.5 border-b border-white/5 px-4 py-3 sm:px-6">
               <span className="h-3 w-3 rounded-full bg-red-500/80" />
               <span className="h-3 w-3 rounded-full bg-yellow-500/80" />
               <span className="h-3 w-3 rounded-full bg-green-500/80" />
-              <span className="ml-3 hidden text-xs tracking-wide text-zinc-500 sm:block">studyshield.study — Today • 6:42 AM • Focus streak 18 days</span>
+              <span className="ml-3 hidden items-center gap-2 text-xs tracking-wide text-zinc-500 sm:inline-flex">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> studyshield.study — Today • 6:42 AM • Focus streak 18 days
+              </span>
               <span className="ml-auto hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/20 sm:inline-flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Live
               </span>
@@ -222,13 +275,38 @@ const Hero = () => {
           </div>
         </motion.div>
 
-        {/* Trust bar */}
-        <div className="mx-auto mt-8 flex max-w-5xl flex-wrap items-center justify-center gap-6 border-t border-white/5 pt-6 text-xs tracking-widest text-zinc-500 sm:justify-between">
-          <span>TRUSTED BY LEARNERS FROM</span>
-          <div className="flex flex-wrap items-center justify-center gap-6 font-semibold tracking-tighter text-zinc-300 sm:gap-10">
-            <span>ALLEN</span><span>FIITJEE</span><span>AAKASH</span><span>RESONANCE</span><span>UNACADEMY</span>
+        {/* Trust bar — film strip */}
+        <div className="relative mx-auto mt-8 max-w-5xl overflow-hidden rounded-xl border border-white/10 bg-black">
+          <div className="absolute inset-x-0 top-0 flex h-2 items-center justify-between bg-[#0a0a0a] px-1">
+            {[...Array(24)].map((_, i) => (
+              <span key={i} className="h-1.5 w-2 rounded-sm bg-white/20" />
+            ))}
+          </div>
+          <div className="absolute inset-x-0 bottom-0 flex h-2 items-center justify-between bg-[#0a0a0a] px-1">
+            {[...Array(24)].map((_, i) => (
+              <span key={i} className="h-1.5 w-2 rounded-sm bg-white/20" />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-6 px-4 py-5 text-xs tracking-widest text-zinc-500 sm:justify-between sm:px-6">
+            <span className="flex items-center gap-2">
+              <span className="h-px w-6 bg-white/20" /> TRUSTED BY LEARNERS FROM
+            </span>
+            <div className="flex flex-wrap items-center justify-center gap-6 font-semibold tracking-tighter text-zinc-300 sm:gap-10">
+              <span>ALLEN</span><span>FIITJEE</span><span>AAKASH</span><span>RESONANCE</span><span>UNACADEMY</span>
+            </div>
           </div>
         </div>
+
+        {/* Scroll cue */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.2, duration: 0.8 }}
+          className="mx-auto mt-6 flex flex-col items-center gap-2"
+        >
+          <span className="text-[10px] tracking-[0.24em] text-white/30">SCROLL</span>
+          <motion.span animate={{ y: [0, 6, 0] }} transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }} className="h-8 w-px bg-gradient-to-b from-white/40 to-transparent" />
+        </motion.div>
       </div>
     </section>
   );
