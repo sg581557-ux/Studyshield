@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Sigma, Shuffle, Star, Grid, List } from 'lucide-react';
 import type { Formula, FormulaSubject, FormulaDifficulty, FormulaImportance, FormulaCategory } from '../../types';
@@ -43,10 +44,13 @@ export function FormulaVault() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const [prevExamId, setPrevExamId] = useState<string | 'All'>(userExamId ?? 'All');
-  if (prevExamId !== (userExamId ?? 'All')) {
-    setPrevExamId(userExamId ?? 'All');
-    setExamFilter(userExamId ?? 'All');
-  }
+  useEffect(() => {
+    const next = userExamId ?? 'All';
+    if (prevExamId !== next) {
+      setPrevExamId(next);
+      setExamFilter(next);
+    }
+  }, [userExamId, prevExamId]);
 
   // Cascading filter options — scoped to the currently selected exam so filters
   // never offer categories/chapters that have no formulas for that exam.
@@ -131,11 +135,11 @@ export function FormulaVault() {
         // Search JEE tip
         if (f.jeeTip && f.jeeTip.toLowerCase().includes(q)) return true;
         // Search tags
-        if (f.tags.some((t) => t.toLowerCase().includes(q))) return true;
+        if ((f.tags || []).some((t) => t.toLowerCase().includes(q))) return true;
         // Search synonyms
-        if (f.synonyms && f.synonyms.some((s) => s.toLowerCase().includes(q))) return true;
+        if ((f.synonyms || []).some((s) => s.toLowerCase().includes(q))) return true;
         // Search variables (symbol + description + unit)
-        if (f.variables.some((v) =>
+        if ((f.variables || []).some((v) =>
           v.symbol.toLowerCase().includes(q) ||
           v.description.toLowerCase().includes(q) ||
           (v.unit && v.unit.toLowerCase().includes(q))
@@ -273,14 +277,6 @@ export function FormulaVault() {
           onAddToFrequentlyUsed={addToFrequentlyUsed}
         />
       )}
-
-      {/* Results count */}
-      <div className="flex items-center gap-2 text-sm text-gray-500">
-        <span>
-          Showing <span className="text-gray-300 font-medium">{filteredFormulas.length}</span> formula
-          {filteredFormulas.length !== 1 ? 's' : ''}
-        </span>
-      </div>
 
       {/* Formula grid or empty state */}
       {filteredFormulas.length === 0 ? (

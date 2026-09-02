@@ -8,3 +8,8 @@
 # dependencies + build artifacts (dist is intentionally tracked for edge deploys)
 node_modules/
 *.tsbuildinfo
+
+# tsc logs
+tsc_*.txt
+tsc_out.txt
+

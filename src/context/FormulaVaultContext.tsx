@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { FormulaVaultData } from '../types';
 import { loadFormulaVault, saveFormulaVault } from '../lib/storage';
 import { useAuth } from './AuthContext';
@@ -25,72 +26,77 @@ const FormulaVaultContext = createContext<FormulaVaultCtx | undefined>(undefined
 
 export function FormulaVaultProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [data, setData] = useState<FormulaVaultData>({
-    favorites: [],
-    recentlyViewed: [],
-    revisionList: [],
-    frequentlyUsed: [],
-  });
+  const [data, setData] = useState<FormulaVaultData>(() => user
+    ? loadFormulaVault(user.id)
+    : { favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] });
 
-  // Load the per-user vault when the signed-in identity changes (or reset it
-  // when signed out). Render-phase adjustment keyed on the user object — the
-  // load commits with the auth change, and the initializer covers first mount.
-  const [prevUser, setPrevUser] = useState(user);
-  if (prevUser !== user) {
-    setPrevUser(user);
+  useEffect(() => {
     setData(user
       ? loadFormulaVault(user.id)
       : { favorites: [], recentlyViewed: [], revisionList: [], frequentlyUsed: [] });
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
-  const persist = useCallback((nd: FormulaVaultData) => {
-    setData(nd);
-    if (user) saveFormulaVault(user.id, nd);
+  const persist = useCallback((updater: (prev: FormulaVaultData) => FormulaVaultData) => {
+    setData((prev) => {
+      const nd = updater(prev);
+      if (user) saveFormulaVault(user.id, nd);
+      return nd;
+    });
   }, [user]);
 
-  const toggleFavorite = (id: string) => {
-    const favs = data.favorites.includes(id)
-      ? data.favorites.filter((f) => f !== id)
-      : [...data.favorites, id];
-    persist({ ...data, favorites: favs });
-  };
+  const toggleFavorite = useCallback((id: string) => {
+    persist((prev) => {
+      const favs = prev.favorites.includes(id)
+        ? prev.favorites.filter((f) => f !== id)
+        : [...prev.favorites, id];
+      return { ...prev, favorites: favs };
+    });
+  }, [persist]);
 
-  const isFavorite = (id: string) => data.favorites.includes(id);
+  const isFavorite = useCallback((id: string) => data.favorites.includes(id), [data.favorites]);
 
-  const addToRecentlyViewed = (id: string) => {
-    const filtered = data.recentlyViewed.filter((r) => r !== id);
-    persist({ ...data, recentlyViewed: [id, ...filtered].slice(0, 20) });
-  };
+  const addToRecentlyViewed = useCallback((id: string) => {
+    persist((prev) => {
+      const filtered = prev.recentlyViewed.filter((r) => r !== id);
+      return { ...prev, recentlyViewed: [id, ...filtered].slice(0, 20) };
+    });
+  }, [persist]);
 
-  const clearRecentlyViewed = () => persist({ ...data, recentlyViewed: [] });
+  const clearRecentlyViewed = useCallback(() => persist((prev) => ({ ...prev, recentlyViewed: [] })), [persist]);
 
-  const addToRevisionList = (id: string) => {
-    if (data.revisionList.includes(id)) return;
-    persist({ ...data, revisionList: [...data.revisionList, id] });
-  };
+  const addToRevisionList = useCallback((id: string) => {
+    persist((prev) => {
+      if (prev.revisionList.includes(id)) return prev;
+      return { ...prev, revisionList: [...prev.revisionList, id] };
+    });
+  }, [persist]);
 
-  const removeFromRevisionList = (id: string) => {
-    persist({ ...data, revisionList: data.revisionList.filter((r) => r !== id) });
-  };
+  const removeFromRevisionList = useCallback((id: string) => {
+    persist((prev) => ({ ...prev, revisionList: prev.revisionList.filter((r) => r !== id) }));
+  }, [persist]);
 
-  const clearRevisionList = () => persist({ ...data, revisionList: [] });
+  const clearRevisionList = useCallback(() => persist((prev) => ({ ...prev, revisionList: [] })), [persist]);
 
-  const isRevised = (id: string) => data.revisionList.includes(id);
+  const isRevised = useCallback((id: string) => data.revisionList.includes(id), [data.revisionList]);
 
-  const addToFrequentlyUsed = (id: string) => {
-    const filtered = data.frequentlyUsed.filter((f) => f !== id);
-    persist({ ...data, frequentlyUsed: [id, ...filtered].slice(0, 50) });
-  };
+  const addToFrequentlyUsed = useCallback((id: string) => {
+    persist((prev) => {
+      const filtered = prev.frequentlyUsed.filter((f) => f !== id);
+      return { ...prev, frequentlyUsed: [id, ...filtered].slice(0, 50) };
+    });
+  }, [persist]);
 
-  const isFrequentlyUsed = (id: string) => data.frequentlyUsed.includes(id);
+  const isFrequentlyUsed = useCallback((id: string) => data.frequentlyUsed.includes(id), [data.frequentlyUsed]);
 
-  const markAsRevised = (id: string) => {
-    if (data.revisionList.includes(id)) {
-      removeFromRevisionList(id);
-    } else {
-      addToRevisionList(id);
-    }
-  };
+  const markAsRevised = useCallback((id: string) => {
+    persist((prev) => {
+      if (prev.revisionList.includes(id)) {
+        return { ...prev, revisionList: prev.revisionList.filter((r) => r !== id) };
+      }
+      return { ...prev, revisionList: [...prev.revisionList, id] };
+    });
+  }, [persist]);
 
   return (
     <FormulaVaultContext.Provider value={{

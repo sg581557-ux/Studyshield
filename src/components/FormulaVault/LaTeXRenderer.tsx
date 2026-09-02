@@ -30,6 +30,7 @@ const KATEX_OPTIONS = {
   throwOnError: false,
   strict: false,
   output: 'htmlAndMathml',
+  trust: false,
   errorColor: '#ef4444', // overridden by `.katex-error` rules in index.css
 } as const;
 

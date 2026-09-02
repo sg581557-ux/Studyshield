@@ -3,18 +3,17 @@ import { createClient } from "@supabase/supabase-js";
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Production domain. Must match the site the reset email links to — the email
-// is sent by the hosted Supabase Auth server, so a dev-origin (localhost) link
-// would never resolve for real users. Never derive this from window.location.
-// Note: studyshield.study / www.studyshield.study are legacy domains that do
-// NOT resolve to the app — the live site is the Cloudflare worker URL.
-export const PRODUCTION_SITE_URL = "https://studyshield.sg581557.workers.dev";
+// Production domain — canonical URL for the public site. Must match the
+// custom domain that Google indexes. Never derive this from window.location.
+// Cloudflare Workers URL (studyshield.sg581557.workers.dev) is NOT canonical.
+export const PRODUCTION_SITE_URL = "https://studyshield.study";
 
 // Environment-aware site URL: development uses the local origin (localhost),
 // production uses the live domain. Overridable via VITE_SITE_URL if needed.
+// Guard `window` for SSR/prerender/vitest where `window` is undefined.
 export const SITE_URL: string = import.meta.env.PROD
   ? (import.meta.env.VITE_SITE_URL ?? PRODUCTION_SITE_URL)
-  : window.location.origin;
+  : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173');
 
 // Password-reset emails must ALWAYS link to the live reset page (PRODUCTION_SITE_URL):
 // GoTrue sends the email from Supabase's servers, so a localhost link would
@@ -29,7 +28,7 @@ export const SIGNUP_REDIRECT_URL = `${SITE_URL}/auth/callback`;
 // OAuth (Google) providers return here after the user picks an account. Same
 // callback as email confirmation — the page exchanges the tokens, creates the
 // profile for new users, and routes by onboarding state. The origin is
-// environment-aware: http://localhost:5173 in dev, https://www.studyshield.study
+// environment-aware: http://localhost:5173 in dev, https://studyshield.study
 // in production (see SITE_URL above).
 export const OAUTH_REDIRECT_URL = `${SITE_URL}/auth/callback`;
 
