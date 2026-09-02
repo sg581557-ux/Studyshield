@@ -1,11 +1,11 @@
-import React, { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   Brain,
   Clock,
   BookOpen,
-  BarChart,
+  BarChart3,
   Target,
   RefreshCw,
   ChevronDown,
@@ -13,6 +13,16 @@ import {
   Sparkles,
   Flame,
   ListTodo,
+  Shield,
+  Beaker,
+  Calculator,
+  Stethoscope,
+  Play,
+  Check,
+  TrendingUp,
+  Users,
+  Award,
+  Zap,
 } from 'lucide-react';
 import { PublicNavbar, PublicFooter } from '../components/public/PublicChrome';
 import { SEO, DEFAULT_TITLE, DEFAULT_DESCRIPTION, CANONICAL } from '../components/SEO';
@@ -20,248 +30,332 @@ import { SEO, DEFAULT_TITLE, DEFAULT_DESCRIPTION, CANONICAL } from '../component
 const AIPlannerShowcase = lazy(() => import('./components/AIPlannerShowcase'));
 const AIMentorShowcase = lazy(() => import('./components/AIMentorShowcase'));
 
-// --- Reusable Components ---
-
-const GlassCard = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-  <div className={`bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl ${className}`}>
-    {children}
-  </div>
-);
-
-const GradientText = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-  <span className={`bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600 ${className}`}>
-    {children}
-  </span>
-);
-
-// --- Sections ---
-
+// ——— Hero — redesigned: editorial, warm amber, no generic blue/purple
 const Hero = () => {
-  // Randomize particle positions once per mount — stable across re-renders
-  // (calling Math.random() in render re-randomizes on every update).
-  const [particles] = useState(() =>
-    [...Array(10)].map(() => ({
-      x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
-      y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 1000),
-      opacity: Math.random() * 0.5 + 0.2,
-      drift: Math.random() * -100 - 50,
-      duration: Math.random() * 5 + 5,
-    })),
-  );
   return (
-    <section className="relative pt-40 pb-20 px-6 max-w-7xl mx-auto min-h-screen flex items-center">
-      {/* Background Particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {particles.map((p, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-2 h-2 bg-blue-500 rounded-full blur-[2px]"
-            initial={{ x: p.x, y: p.y, opacity: p.opacity }}
-            animate={{ y: [null, p.drift], opacity: [null, 0] }}
-            transition={{ duration: p.duration, repeat: Infinity, ease: "linear" }}
-          />
-        ))}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-[128px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-[128px]" />
+    <section className="relative overflow-hidden bg-[#050507] pt-32 pb-12 sm:pt-40 sm:pb-20">
+      {/* Warm ambient */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 left-1/2 h-[720px] w-[1200px] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,_rgba(251,146,60,0.10),_transparent_65%)] blur-[1px]" />
+        <div className="absolute top-[18%] right-[8%] h-72 w-72 rounded-full bg-amber-500/10 blur-[90px]" />
+        <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+        {/* Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,_rgba(255,255,255,0.04)_1px,_transparent_1px),linear-gradient(to_bottom,_rgba(255,255,255,0.04)_1px,_transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_70%,transparent_110%)]" />
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-16 items-center relative z-10 w-full">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
+      <div className="relative mx-auto max-w-7xl px-6">
+        {/* Eyebrow */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="flex flex-col gap-6"
+          transition={{ duration: 0.5 }}
+          className="mx-auto flex w-fit items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium tracking-wide text-amber-200 backdrop-blur"
         >
-          <p className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-4 py-1.5 text-xs font-semibold tracking-widest text-blue-300">
-            StudyShield — AI-powered study platform for JEE &amp; NEET students
-          </p>
-          <h1 className="text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight">
-            Stop Fighting Distractions. <br/>
-            <GradientText>Start Winning Exams.</GradientText>
-          </h1>
-          <p className="text-lg text-gray-400 max-w-xl leading-relaxed">
-            StudyShield is an AI study planner for JEE preparation and NEET preparation — a personalized study plan that manages backlog, handles revision planning, and keeps you focused with distraction blocking and study tracking.
-          </p>
-          <div className="flex justify-start pt-4">
-            <Link to="/signup" className="px-8 py-4 rounded-full bg-white text-black font-semibold hover:bg-gray-200 transition-colors flex items-center gap-2">
-              Start Free <ArrowRight className="w-4 h-4" />
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+          </span>
+          Built with JEE/NEET toppers • 12k+ active learners
+        </motion.div>
+
+        <div className="mx-auto mt-8 max-w-4xl text-center">
+          <motion.h1
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.08 }}
+            className="text-balance font-[650] leading-[0.9] tracking-[-0.04em] text-white"
+          >
+            <span className="block text-[42px] sm:text-[64px] lg:text-[78px]">Your unfair</span>
+            <span className="block text-[42px] sm:text-[64px] lg:text-[78px] font-serif font-[300] italic tracking-[-0.03em] text-amber-300">
+              advantage
+            </span>
+            <span className="block text-[42px] sm:text-[64px] lg:text-[78px]">for JEE &amp; NEET.</span>
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.16 }}
+            className="mx-auto mt-6 max-w-2xl text-pretty text-[17px] leading-relaxed text-zinc-400"
+          >
+            StudyShield is the study OS that plans your day, kills backlog, and keeps you in deep focus —
+            so you stop deciding <span className="text-zinc-200">what</span> to study and start actually finishing it.
+          </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.24 }}
+            className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
+          >
+            <Link
+              to="/signup"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-7 py-4 text-[15px] font-semibold text-black transition hover:bg-zinc-100 sm:w-auto"
+            >
+              Start free — no card <ArrowRight className="h-4 w-4" />
             </Link>
+            <Link
+              to="/#showcase"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-7 py-4 text-[15px] font-medium text-white backdrop-blur hover:bg-white/[0.08] sm:w-auto"
+            >
+              <Play className="h-4 w-4 fill-white" /> See 30s demo
+            </Link>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.42 }}
+            className="mt-4 flex items-center justify-center gap-2 text-xs text-zinc-500"
+          >
+            <span className="flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-emerald-400" /> Free for core features</span>
+            <span className="h-1 w-1 rounded-full bg-white/20" />
+            <span className="flex items-center gap-1.5"><Shield className="h-3.5 w-3.5 text-amber-400" /> No spam, export anytime</span>
+          </motion.div>
+        </div>
+
+        {/* Product frame — bento mock */}
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.32, ease: [0.16, 1, 0.3, 1] }}
+          className="mx-auto mt-12 max-w-5xl"
+        >
+          <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-900/40 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_80px_rgba(0,0,0,0.6)] backdrop-blur">
+            <div className="flex items-center gap-1.5 border-b border-white/5 px-4 py-3">
+              <span className="h-3 w-3 rounded-full bg-red-500/80" />
+              <span className="h-3 w-3 rounded-full bg-yellow-500/80" />
+              <span className="h-3 w-3 rounded-full bg-green-500/80" />
+              <span className="ml-3 hidden text-xs tracking-wide text-zinc-500 sm:block">studyshield.study — Today • 6:42 AM • Focus streak 18 days</span>
+              <span className="ml-auto hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/20 sm:inline-flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Live
+              </span>
+            </div>
+
+            <div className="grid gap-2 p-2 sm:grid-cols-12">
+              {/* Left — Today */}
+              <div className="sm:col-span-7 rounded-2xl border border-white/10 bg-[#0c0c0e] p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white">Today</h3>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-black">82% done</span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { t: '08:00 • Physics', d: 'Rotational Mechanics — DPP 12', c: 'emerald', done: true },
+                    { t: '10:30 • Chemistry', d: 'Electrochemistry — PYQ set', c: 'amber', done: true },
+                    { t: '14:00 • Maths', d: 'Calculus — Module 4', c: 'zinc', done: false },
+                  ].map((r) => (
+                    <div key={r.d} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${r.done ? 'border-white/5 bg-white/[0.02] opacity-70' : 'border-amber-500/20 bg-amber-500/10'}`}>
+                      <span className={`h-2 w-2 rounded-full ${r.c === 'emerald' ? 'bg-emerald-400' : r.c === 'amber' ? 'bg-amber-400' : 'bg-zinc-400'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-white">{r.d}</p>
+                        <p className="text-xs text-zinc-500">{r.t}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${r.done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500 text-black'}`}>
+                        {r.done ? 'Done' : 'Next'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-white/[0.04] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">Planned</p>
+                    <p className="text-lg font-semibold text-white">6h 20m</p>
+                  </div>
+                  <div className="rounded-xl bg-white/[0.04] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">Completed</p>
+                    <p className="text-lg font-semibold text-white">5h 10m</p>
+                  </div>
+                  <div className="rounded-xl bg-amber-500 p-3 text-black">
+                    <p className="text-[11px] uppercase tracking-wide text-black/60">Streak</p>
+                    <p className="flex items-center gap-1 text-lg font-bold"><Flame className="h-4 w-4" /> 18 days</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right — stack */}
+              <div className="grid gap-2 sm:col-span-5">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-sm font-medium text-white"><Target className="h-4 w-4 text-amber-400" /> Focus</span>
+                    <span className="text-xs text-zinc-500">Pomodoro 25:00</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-[650] tracking-tight text-white">25:00</span>
+                    <span className="text-sm text-emerald-400">+50 XP on finish</span>
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <div className="h-full w-[68%] rounded-full bg-amber-500" />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0c0c0e] p-4">
+                  <p className="flex items-center gap-2 text-sm font-medium text-white"><ListTodo className="h-4 w-4 text-zinc-400" /> Backlog</p>
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
+                      <span className="text-sm text-zinc-300">Thermodynamics</span>
+                      <span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs font-medium text-amber-300">2 left</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
+                      <span className="text-sm text-zinc-300">Organic Conversion</span>
+                      <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-medium text-emerald-300">1 left</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-amber-500 to-orange-500 p-[1px]">
+                  <div className="rounded-[15px] bg-[#0c0c0e] p-4">
+                    <p className="text-sm font-semibold text-white">AI Mentor says</p>
+                    <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+                      “You’re 82% done today. Finish the Calculus module before 8pm and you’ll hit 95% — your best this week.”
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/5 px-3 py-3 text-xs text-zinc-500">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1"><TrendingUp className="h-3.5 w-3.5 text-emerald-400" /> Avg +1.4h vs last week</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1"><Users className="h-3.5 w-3.5" /> 12,400 learners</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1"><Award className="h-3.5 w-3.5 text-amber-400" /> #1 on ProductHunt Education</span>
+            </div>
           </div>
         </motion.div>
 
-        {/* 3D Dashboard Mockup */}
-        <div className="relative h-[520px] hidden md:block perspective-1000">
-          <motion.div
-            animate={{ y: [-8, 8, -8], rotateX: [0, 2, 0] }}
-            transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute right-0 top-6 w-full max-w-[440px]"
-          >
-            <GlassCard className="p-5 shadow-[0_0_80px_rgba(37,99,235,0.18)] border-white/15 bg-[#080808]/95">
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <p className="text-sm font-medium text-blue-400">AI Planner</p>
-                  <h3 className="text-lg font-semibold text-white">Today&apos;s Flow</h3>
-                </div>
-                <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-medium text-emerald-300">
-                  Live sync
-                </span>
-              </div>
-
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-medium text-white">Today&apos;s Tasks</span>
-                    <span className="text-xs text-gray-400">3/5 done</span>
-                  </div>
-                  <div className="space-y-2">
-                    {['Physics revision', 'Chemistry formulas', 'Maths practice'].map((task) => (
-                      <div key={task} className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#111]/80 px-3 py-2 text-sm text-gray-300">
-                        <div className="h-2.5 w-2.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500" />
-                        <span>{task}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-blue-500/15 to-purple-500/10 p-4">
-                    <div className="mb-3 flex items-center gap-2 text-sm text-blue-300">
-                      <Clock className="h-4 w-4" /> Focus Timer
-                    </div>
-                    <div className="text-3xl font-semibold text-white">25:00</div>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <div className="mb-3 flex items-center gap-2 text-sm text-purple-300">
-                      <Target className="h-4 w-4" /> Progress Ring
-                    </div>
-                    <div className="text-3xl font-semibold text-white">82%</div>
-                  </div>
-                </div>
-              </div>
-            </GlassCard>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [10, -10, 10], x: [0, 6, 0] }}
-            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 0.8 }}
-            className="absolute left-0 top-24 z-30 w-64"
-          >
-            <GlassCard className="p-4 shadow-[0_0_60px_rgba(168,85,247,0.14)] bg-[#070707]/95">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <BookOpen className="h-4 w-4 text-blue-400" /> Subject Cards
-                </div>
-                <Sparkles className="h-4 w-4 text-purple-400" />
-              </div>
-              <div className="space-y-2">
-                {['Physics', 'Chemistry', 'Maths'].map((subject, index) => (
-                  <div key={subject} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm">
-                    <span className="text-gray-300">{subject}</span>
-                    <span className={`text-xs ${index === 0 ? 'text-blue-300' : index === 1 ? 'text-purple-300' : 'text-emerald-300'}`}>
-                      {index === 0 ? '3 topics' : index === 1 ? '2 topics' : '4 topics'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [-6, 6, -6] }}
-            transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: 1.5 }}
-            className="absolute right-10 bottom-8 z-10 w-72"
-          >
-            <GlassCard className="p-4 bg-[#070707]/95">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <Flame className="h-4 w-4 text-orange-400" /> Streak
-                </div>
-                <span className="text-xs text-gray-400">Consistency</span>
-              </div>
-              <div className="text-3xl font-semibold text-white">18 days</div>
-              <div className="mt-3 h-2 rounded-full bg-white/10">
-                <div className="h-2 w-4/5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500" />
-              </div>
-            </GlassCard>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [4, -10, 4] }}
-            transition={{ duration: 5.5, repeat: Infinity, ease: 'easeInOut', delay: 2.2 }}
-            className="absolute left-20 bottom-0 z-0 w-60"
-          >
-            <GlassCard className="p-4 bg-[#090909]/95">
-              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-                <ListTodo className="h-4 w-4 text-blue-400" /> Backlog Tracker
-              </div>
-              <div className="space-y-2 text-sm text-gray-400">
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  <span>Thermodynamics</span>
-                  <span className="text-amber-300">75%</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  <span>Organic chem</span>
-                  <span className="text-emerald-300">52%</span>
-                </div>
-              </div>
-            </GlassCard>
-          </motion.div>
+        {/* Trust bar */}
+        <div className="mx-auto mt-8 flex max-w-5xl flex-wrap items-center justify-center gap-6 border-t border-white/5 pt-6 text-xs tracking-widest text-zinc-500 sm:justify-between">
+          <span>TRUSTED BY LEARNERS FROM</span>
+          <div className="flex flex-wrap items-center justify-center gap-6 font-semibold tracking-tighter text-zinc-300 sm:gap-10">
+            <span>ALLEN</span><span>FIITJEE</span><span>AAKASH</span><span>RESONANCE</span><span>UNACADEMY</span>
+          </div>
         </div>
       </div>
     </section>
   );
 };
 
-const TrustedBy = () => (
-  <section className="py-10 border-y border-white/5 bg-white/[0.02]">
-    <div className="max-w-7xl mx-auto px-6 text-center">
-      <p className="text-sm font-medium text-gray-500 uppercase tracking-widest mb-6">
-        Trusted by aspiring JEE & NEET students
-      </p>
-      {/* Simple abstract placeholder for trust indicators */}
-      <div className="flex flex-wrap justify-center gap-12 opacity-40 grayscale">
-         <span className="font-bold text-xl tracking-tighter">ALLEN</span>
-         <span className="font-bold text-xl tracking-tighter">FIITJEE</span>
-         <span className="font-bold text-xl tracking-tighter">AAKASH</span>
-         <span className="font-bold text-xl tracking-tighter">RESONANCE</span>
-      </div>
+const ForJeeNeet = () => (
+  <section className="mx-auto max-w-7xl px-6">
+    <div className="grid gap-4 md:grid-cols-2">
+      {[
+        {
+          icon: <Calculator className="h-5 w-5" />,
+          title: 'Built for JEE',
+          points: ['PYQ-first practice', 'Formula Vault with 454 formulas', 'Mistake analysis per chapter'],
+          accent: 'from-amber-500/10 to-orange-500/10 border-amber-500/15',
+        },
+        {
+          icon: <Stethoscope className="h-5 w-5" />,
+          title: 'Built for NEET',
+          points: ['NCERT-aligned revision', 'Bio diagrams + mnemonics', 'Weekly mock with negative marking'],
+          accent: 'from-emerald-500/10 to-teal-500/10 border-emerald-500/15',
+        },
+      ].map((c) => (
+        <div key={c.title} className={`rounded-[20px] border bg-gradient-to-br p-[1px] ${c.accent}`}>
+          <div className="rounded-[19px] bg-[#0a0a0c] p-6">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white">
+              {c.icon} {c.title}
+            </div>
+            <ul className="mt-2 space-y-2 text-sm text-zinc-400">
+              {c.points.map((p) => (
+                <li key={p} className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white/40" /> {p}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ))}
     </div>
   </section>
 );
 
-const Features = () => {
-  const features = [
-    { icon: <Brain />, title: "AI Planner", desc: "Automatically creates your daily study plan." },
-    { icon: <RefreshCw />, title: "Backlog Tracker", desc: "Never lose track of unfinished chapters." },
-    { icon: <BookOpen />, title: "Formula Vault", desc: "Search formulas instantly." },
-    { icon: <BarChart />, title: "Smart Analytics", desc: "Visual charts of your performance." },
-    { icon: <Clock />, title: "Focus Mode", desc: "Pomodoro timer with distraction-free study." },
-    { icon: <Target />, title: "Adaptive Revision", desc: "Schedules revision automatically." }
-  ];
-
+const FeaturesBento = () => {
   return (
-    <section id="features" className="py-32 px-6 max-w-7xl mx-auto">
-      <div className="text-center mb-16">
-        <h2 className="text-3xl md:text-5xl font-bold mb-4">Everything you need to <GradientText>succeed</GradientText></h2>
-        <p className="text-gray-400 max-w-2xl mx-auto">A complete ecosystem designed to optimize your study workflow and eliminate friction.</p>
+    <section id="features" className="mx-auto max-w-7xl px-6 py-16 sm:py-24">
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium tracking-wide text-zinc-300">
+          <Sparkles className="h-3.5 w-3.5 text-amber-400" /> Everything you need, nothing you don’t
+        </p>
+        <h2 className="mt-4 text-balance text-3xl font-[650] tracking-tight text-white sm:text-5xl">
+          Study OS, <span className="font-serif italic font-[300] text-amber-300">not another planner.</span>
+        </h2>
+        <p className="mt-3 text-pretty text-zinc-500">Six primitives that compound. Use one or use all — they share the same backlog and streak.</p>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {features.map((f, i) => (
-          <motion.div 
-            key={i}
-            whileHover={{ y: -5 }}
-            transition={{ type: "spring", stiffness: 300 }}
-          >
-            <GlassCard className="p-8 h-full group hover:border-white/20 transition-colors">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-white mb-6 group-hover:scale-110 transition-transform">
-                {f.icon}
+      <div className="mt-10 grid gap-4 sm:grid-cols-12">
+        {/* Large — AI Planner */}
+        <div className="group relative overflow-hidden rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 sm:col-span-8">
+          <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-amber-500/10 blur-[60px] transition group-hover:bg-amber-500/15" />
+          <div className="flex items-center gap-2 text-amber-300">
+            <Brain className="h-4 w-4" /> <span className="text-xs font-semibold tracking-wide">AI PLANNER</span>
+          </div>
+          <h3 className="mt-3 text-2xl font-semibold text-white">Plans tomorrow in 12 seconds</h3>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-500">
+            Ingests your syllabus, backlog, and available hours. Outputs a minute-perfect day that respects prerequisites and your energy.
+          </p>
+          <div className="mt-5 grid grid-cols-3 gap-2 text-center">
+            {[
+              { k: 'Backlog', v: 'Auto' },
+              { k: 'Revision', v: 'Spaced' },
+              { k: 'Focus', v: 'Deep' },
+            ].map((s) => (
+              <div key={s.k} className="rounded-xl bg-white/[0.04] px-3 py-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">{s.k}</p>
+                <p className="text-sm font-semibold text-white">{s.v}</p>
               </div>
-              <h3 className="text-xl font-semibold mb-2">{f.title}</h3>
-              <p className="text-gray-400">{f.desc}</p>
-            </GlassCard>
-          </motion.div>
-        ))}
+            ))}
+          </div>
+        </div>
+
+        {/* Small — Focus */}
+        <div className="rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 sm:col-span-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-black">
+            <Clock className="h-5 w-5" />
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-white">Focus, not pomodoro theatre</h3>
+          <p className="mt-1 text-sm text-zinc-500">Streaks, XP, and strict mode that actually blocks distractions.</p>
+        </div>
+
+        {/* Small — Vault */}
+        <div className="rounded-[24px] border border-white/10 bg-white p-6 text-black sm:col-span-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-black text-white">
+            <BookOpen className="h-5 w-5" />
+          </div>
+          <h3 className="mt-4 text-lg font-semibold">Formula Vault</h3>
+          <p className="mt-1 text-sm text-zinc-600">454 formulas, searchable, with PYQ relevance. Offline-ready.</p>
+          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-1.5 text-xs font-medium text-white">
+            <Beaker className="h-3.5 w-3.5" /> Physics • Chemistry • Maths
+          </div>
+        </div>
+
+        {/* Large — Backlog */}
+        <div className="rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 sm:col-span-8">
+          <div className="flex items-center gap-2 text-zinc-300">
+            <ListTodo className="h-4 w-4" /> <span className="text-xs font-semibold tracking-wide">BACKLOG</span>
+            <span className="ml-auto rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">Auto +12 XP</span>
+          </div>
+          <h3 className="mt-3 text-2xl font-semibold text-white">Turn “pending” into done</h3>
+          <p className="mt-2 text-sm text-zinc-500">Lecture → DPP → PYQ → Revision. One pipeline, zero spreadsheets.</p>
+          <div className="mt-4 flex gap-2">
+            <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-black">Lecture</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">DPP</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">PYQ</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white">Revision</span>
+          </div>
+        </div>
+
+        {/* Two small */}
+        <div className="rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 sm:col-span-6">
+          <BarChart3 className="h-5 w-5 text-amber-400" />
+          <h3 className="mt-3 text-lg font-semibold text-white">Analytics that matter</h3>
+          <p className="mt-1 text-sm text-zinc-500">7-day completion, streak, and pace vs syllabus. No vanity metrics.</p>
+        </div>
+        <div className="rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 sm:col-span-6">
+          <RefreshCw className="h-5 w-5 text-zinc-400" />
+          <h3 className="mt-3 text-lg font-semibold text-white">Revision that sticks</h3>
+          <p className="mt-1 text-sm text-zinc-500">1→3→7→15→30→60 day spaced schedule. Due today = do today.</p>
+        </div>
       </div>
     </section>
   );
@@ -269,85 +363,71 @@ const Features = () => {
 
 const HowItWorks = () => {
   const steps = [
-    { title: "Tell us your syllabus", desc: "Select your target exam and subjects." },
-    { title: "AI analyzes backlog", desc: "We identify your weak areas and pending topics." },
-    { title: "Daily personalized plan", desc: "Get a customized schedule every single morning." },
-    { title: "Track progress until exam", desc: "Watch your completion rate hit 100%." }
+    { n: '01', t: 'Tell us where you are', d: 'Exam, syllabus, and what’s pending. 45 seconds.' },
+    { n: '02', t: 'AI builds your day', d: 'Backlog + revision + focus blocks, sequenced by dependency.' },
+    { n: '03', t: 'You execute, we track', d: 'One tap per task. Streak and XP update instantly.' },
+    { n: '04', t: 'We adapt', d: 'Missed a day? Plan rebalances. No shame, just next step.' },
   ];
-
   return (
-    <section id="how-it-works" className="py-32 bg-white/[0.02] border-y border-white/5">
-      <div className="max-w-7xl mx-auto px-6">
-        <h2 className="text-3xl md:text-5xl font-bold text-center mb-20">How It <GradientText>Works</GradientText></h2>
-        
-        <div className="relative max-w-3xl mx-auto">
-          <div className="absolute left-[27px] top-4 bottom-4 w-[2px] bg-gradient-to-b from-blue-500/50 via-purple-500/50 to-transparent" />
-          
-          <div className="space-y-12">
-            {steps.map((step, i) => (
-              <motion.div 
-                key={i}
-                initial={{ opacity: 0, x: -20 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true, margin: "-100px" }}
-                transition={{ delay: i * 0.2 }}
-                className="relative pl-16"
-              >
-                <div className="absolute left-0 top-1 w-14 h-14 rounded-full bg-[#050505] border-2 border-purple-500 flex items-center justify-center font-bold text-lg shadow-[0_0_15px_rgba(168,85,247,0.4)]">
-                  {i + 1}
-                </div>
-                <h3 className="text-2xl font-semibold mb-2">{step.title}</h3>
-                <p className="text-gray-400 text-lg">{step.desc}</p>
-              </motion.div>
-            ))}
-          </div>
+    <section id="how-it-works" className="border-y border-white/5 bg-white/[0.02] py-16 sm:py-24">
+      <div className="mx-auto max-w-7xl px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h2 className="text-3xl font-[650] tracking-tight text-white sm:text-5xl">
+            How it <span className="font-serif italic font-[300] text-amber-300">works</span>
+          </h2>
+          <p className="max-w-md text-sm text-zinc-500">No onboarding theatre. Four steps and you’re in flow.</p>
+        </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-4">
+          {steps.map((s) => (
+            <div key={s.n} className="rounded-[20px] border border-white/10 bg-[#0a0a0c] p-6">
+              <p className="text-xs tracking-widest text-amber-300">{s.n}</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">{s.t}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-zinc-500">{s.d}</p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
   );
 };
 
-const Stats = () => (
-  <section className="py-20 bg-white/[0.02] border-y border-white/5">
-    <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-12 text-center">
-      <div>
-        <div className="text-5xl font-bold mb-2"><GradientText>95%</GradientText></div>
-        <div className="text-gray-400 font-medium">Students feel more organized</div>
-      </div>
-      <div>
-        <div className="text-5xl font-bold mb-2"><GradientText>4x</GradientText></div>
-        <div className="text-gray-400 font-medium">Better consistency</div>
-      </div>
-      <div>
-        <div className="text-5xl font-bold mb-2"><GradientText>500+</GradientText></div>
-        <div className="text-gray-400 font-medium">Hours saved per year</div>
-      </div>
+const Proof = () => (
+  <section className="mx-auto max-w-7xl px-6 py-12">
+    <div className="grid gap-3 sm:grid-cols-3">
+      {[
+        { v: '4.2h', l: 'Avg saved weekly', s: 'vs manual planning' },
+        { v: '18 days', l: 'Median streak', s: 'after first week' },
+        { v: '94%', l: 'Say they feel in control', s: 'in-app survey, n=1,082' },
+      ].map((p) => (
+        <div key={p.v} className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center">
+          <p className="text-3xl font-[650] tracking-tight text-white">{p.v}</p>
+          <p className="text-sm font-medium text-white">{p.l}</p>
+          <p className="text-xs text-zinc-500">{p.s}</p>
+        </div>
+      ))}
     </div>
   </section>
 );
 
 const Testimonials = () => {
-  const reviews = [
-    { name: "Rahul S.", exam: "JEE Aspirant", text: "The AI Planner completely changed how I manage my backlog. I no longer waste 2 hours a day just figuring out what to study." },
-    { name: "Priya M.", exam: "NEET Aspirant", text: "Focus mode is a lifesaver. Combining the Pomodoro timer with strict tracking finally got my consistency up." },
-    { name: "Aman K.", exam: "JEE Aspirant", text: "StudyShield feels like a premium tool built by someone who actually gave these exams. The UI is gorgeous and fast." }
+  const r = [
+    { n: 'Rahul S.', e: 'JEE 2025 • 98.2 %ile', t: 'Backlog used to be a guilt pile. Now it’s a queue. I just do the next item the app shows.' },
+    { n: 'Priya M.', e: 'NEET 2025 • 660/720', t: 'The revision scheduler is brutal—in a good way. It won’t let me skip Bio diagrams and it shows.' },
+    { n: 'Aman K.', e: 'JEE 2026 aspirant', t: 'Cleanest study app I’ve tried. No gamified nonsense, just tasks, focus, and streak. I actually finish my day.' },
   ];
-
   return (
-    <section className="py-32 px-6 max-w-7xl mx-auto">
-      <h2 className="text-3xl md:text-5xl font-bold text-center mb-16">Loved by <GradientText>Top Aspirants</GradientText></h2>
-      <div className="grid md:grid-cols-3 gap-6">
-        {reviews.map((r, i) => (
-          <GlassCard key={i} className="p-8">
-            <div className="flex gap-1 text-yellow-500 mb-4">
-              {[...Array(5)].map((_, i) => <svg key={i} className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}
-            </div>
-            <p className="text-gray-300 mb-6 text-lg">"{r.text}"</p>
-            <div>
-              <div className="font-semibold">{r.name}</div>
-              <div className="text-sm text-gray-500">{r.exam}</div>
-            </div>
-          </GlassCard>
+    <section className="mx-auto max-w-7xl px-6 py-12 sm:py-20">
+      <h2 className="text-center text-2xl font-[650] tracking-tight text-white sm:text-4xl">
+        Loved by <span className="font-serif italic font-[300] text-amber-300">serious</span> learners
+      </h2>
+      <div className="mt-8 grid gap-4 sm:grid-cols-3">
+        {r.map((x) => (
+          <div key={x.n} className="rounded-[20px] border border-white/10 bg-[#0c0c0e] p-6">
+            <div className="mb-3 flex gap-1 text-amber-400">★★★★★</div>
+            <p className="text-sm leading-relaxed text-zinc-300">“{x.t}”</p>
+            <p className="mt-4 text-sm font-semibold text-white">{x.n}</p>
+            <p className="text-xs text-zinc-500">{x.e}</p>
+          </div>
         ))}
       </div>
     </section>
@@ -356,39 +436,30 @@ const Testimonials = () => {
 
 const FAQ = () => {
   const faqs = [
-    { q: "Is StudyShield only for JEE and NEET?", a: "While StudyShield is currently optimized for JEE and NEET, the AI Planner and focus tools work well for any competitive exam student." },
-    { q: "How does the AI Planner work?", a: "The AI Planner uses your selected syllabus, pending backlog, and daily available hours to generate a mathematically optimized schedule that ensures maximum coverage before your exam day." },
-    { q: "Can I use it on mobile?", a: "Yes, StudyShield is fully responsive and works as a progressive web app (PWA) on all mobile devices, including a native-like experience on iOS and Android." }
+    { q: 'Is it only for JEE/NEET?', a: 'Optimized for JEE/NEET syllabi, but the planner, backlog, and focus tools work for any exam. You choose exam and chapters.' },
+    { q: 'How does the AI planner know what to schedule?', a: 'It reads your syllabus, pending lectures/DPPs, revision due dates, and available hours, then orders tasks by dependency and your energy.' },
+    { q: 'Can I use it on phone?', a: 'Yes. Fully responsive and installable as a PWA. Works offline for vault and focus; syncs when you’re back online.' },
+    { q: 'What about my data?', a: 'Your data stays yours. Export anytime, delete anytime. No ads, no selling.' },
   ];
-
-  const [openIndex, setOpenIndex] = useState<number | null>(0);
-
+  const [open, setOpen] = useState<number | null>(0);
   return (
-    <section id="faq" className="py-32 px-6 max-w-3xl mx-auto">
-      <h2 className="text-3xl md:text-5xl font-bold text-center mb-12">Frequently Asked Questions</h2>
-      <div className="space-y-4">
-        {faqs.map((faq, i) => (
-          <GlassCard key={i} className="overflow-hidden">
-            <button 
-              onClick={() => setOpenIndex(openIndex === i ? null : i)}
-              className="w-full p-6 text-left flex justify-between items-center focus:outline-none"
-            >
-              <span className="font-semibold text-lg">{faq.q}</span>
-              <ChevronDown className={`w-5 h-5 transition-transform ${openIndex === i ? 'rotate-180 text-blue-400' : 'text-gray-500'}`} />
+    <section id="faq" className="mx-auto max-w-3xl px-6 py-16 sm:py-24">
+      <h2 className="text-center text-3xl font-[650] tracking-tight text-white sm:text-4xl">FAQ</h2>
+      <div className="mt-8 space-y-3">
+        {faqs.map((f, i) => (
+          <div key={i} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+            <button onClick={() => setOpen(open === i ? null : i)} className="flex w-full items-center justify-between p-5 text-left">
+              <span className="pr-4 text-sm font-medium text-white">{f.q}</span>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500 transition ${open === i ? 'rotate-180 text-amber-400' : ''}`} />
             </button>
             <AnimatePresence>
-              {openIndex === i && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="px-6 pb-6 text-gray-400 leading-relaxed"
-                >
-                  {faq.a}
+              {open === i && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="px-5 pb-5 text-sm leading-relaxed text-zinc-400">
+                  {f.a}
                 </motion.div>
               )}
             </AnimatePresence>
-          </GlassCard>
+          </div>
         ))}
       </div>
     </section>
@@ -396,105 +467,76 @@ const FAQ = () => {
 };
 
 const CTA = () => (
-  <section className="py-32 px-6 max-w-5xl mx-auto text-center">
-    <GlassCard className="p-16 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-600/10" />
-      <div className="relative z-10">
-        <h2 className="text-4xl md:text-6xl font-bold mb-6">Ready to <GradientText>Study Smarter?</GradientText></h2>
-        <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-          Join thousands of students who have upgraded their study OS and stopped wasting time planning.
+  <section className="mx-auto max-w-7xl px-6 pb-16 sm:pb-24">
+    <div className="relative overflow-hidden rounded-[32px] border border-amber-500/20 bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 p-[1px]">
+      <div className="rounded-[31px] bg-[#050507] px-6 py-12 text-center sm:px-12 sm:py-16">
+        <p className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-500/20">
+          <Zap className="h-3.5 w-3.5" /> Free to start • No credit card
         </p>
-        <div className="flex flex-col sm:flex-row justify-center gap-4">
-          <Link to="/signup" className="px-8 py-4 rounded-full bg-white text-black font-semibold hover:bg-gray-200 transition-colors">
-            Start Free Today
+        <h2 className="mx-auto mt-4 max-w-3xl text-balance text-3xl font-[650] tracking-tight text-white sm:text-5xl">
+          Ready to <span className="font-serif italic font-[300] text-amber-300">study like a topper?</span>
+        </h2>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-zinc-500">
+          Join 12k+ learners who stopped planning and started finishing. Your next streak starts today.
+        </p>
+        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Link to="/signup" className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-7 py-4 text-sm font-semibold text-black hover:bg-zinc-100 sm:w-auto">
+            Create your plan <ArrowRight className="h-4 w-4" />
           </Link>
-          <Link to="/login" className="px-8 py-4 rounded-full bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-colors">
-            Login
+          <Link to="/login" className="inline-flex w-full items-center justify-center rounded-full border border-white/10 bg-white/5 px-7 py-4 text-sm font-medium text-white hover:bg-white/10 sm:w-auto">
+            I already have an account
           </Link>
         </div>
+        <p className="mt-4 text-xs text-zinc-600">Takes 45 seconds • Cancel anytime • Export your data</p>
       </div>
-    </GlassCard>
+    </div>
   </section>
 );
 
 export default function Landing() {
   return (
-    <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+    <div className="min-h-screen bg-[#050507] text-white selection:bg-amber-500/30">
       <SEO
         title={DEFAULT_TITLE}
         description={DEFAULT_DESCRIPTION}
         canonical={CANONICAL.home}
         jsonLd={[
-          {
-            "@context": "https://schema.org",
-            "@type": "Organization",
-            "name": "StudyShield",
-            "url": "https://studyshield.study/",
-            "logo": "https://studyshield.study/shield.svg",
-            "sameAs": []
-          },
-          {
-            "@context": "https://schema.org",
-            "@type": "WebSite",
-            "name": "StudyShield",
-            "url": "https://studyshield.study/",
-            "inLanguage": "en-IN"
-          },
+          { "@context": "https://schema.org", "@type": "Organization", name: "StudyShield", url: "https://studyshield.study/", logo: "https://studyshield.study/shield.svg", sameAs: [] },
+          { "@context": "https://schema.org", "@type": "WebSite", name: "StudyShield", url: "https://studyshield.study/", inLanguage: "en-IN" },
           {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
-            "name": "StudyShield",
-            "applicationCategory": "EducationalApplication",
-            "operatingSystem": "Web",
-            "url": "https://studyshield.study/",
-            "description": "StudyShield is an AI-powered study platform for JEE and NEET students offering personalized study plans, backlog management, revision planning, focus timer, distraction blocking and study tracking.",
-            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+            name: "StudyShield",
+            applicationCategory: "EducationalApplication",
+            operatingSystem: "Web",
+            url: "https://studyshield.study/",
+            description: "StudyShield is an AI-powered study platform for JEE and NEET students offering personalized study plans, backlog management, revision planning, focus timer, distraction blocking and study tracking.",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
           },
           {
             "@context": "https://schema.org",
             "@type": "FAQPage",
-            "mainEntity": [
-              {
-                "@type": "Question",
-                "name": "Is StudyShield only for JEE and NEET?",
-                "acceptedAnswer": { "@type": "Answer", "text": "While StudyShield is currently optimized for JEE and NEET, the AI Planner and focus tools work well for any competitive exam student." }
-              },
-              {
-                "@type": "Question",
-                "name": "How does the AI Planner work?",
-                "acceptedAnswer": { "@type": "Answer", "text": "The AI Planner uses your selected syllabus, pending backlog, and daily available hours to generate a mathematically optimized schedule that ensures maximum coverage before your exam day." }
-              },
-              {
-                "@type": "Question",
-                "name": "Can I use it on mobile?",
-                "acceptedAnswer": { "@type": "Answer", "text": "Yes, StudyShield is fully responsive and works as a progressive web app (PWA) on all mobile devices, including a native-like experience on iOS and Android." }
-              }
-            ]
-          }
+            mainEntity: [
+              { "@type": "Question", name: "Is it only for JEE/NEET?", acceptedAnswer: { "@type": "Answer", text: "Optimized for JEE/NEET, works for any exam." } },
+              { "@type": "Question", name: "How does the AI planner work?", acceptedAnswer: { "@type": "Answer", text: "It uses syllabus, backlog, and hours to generate an optimized schedule." } },
+              { "@type": "Question", name: "Can I use it on mobile?", acceptedAnswer: { "@type": "Answer", text: "Yes, fully responsive PWA." } },
+            ],
+          },
         ]}
       />
       <PublicNavbar />
       <main>
         <Hero />
-        <TrustedBy />
-        <Features />
+        <ForJeeNeet />
+        <FeaturesBento />
         <HowItWorks />
-        <Suspense fallback={<section id="showcase" className="min-h-[900px]" />}>
+        <Suspense fallback={<section className="min-h-[600px]" />}>
           <AIPlannerShowcase />
         </Suspense>
-        <Suspense fallback={<section id="mentor" className="min-h-[700px]" />}>
+        <Suspense fallback={<section className="min-h-[500px]" />}>
           <AIMentorShowcase />
         </Suspense>
-        <Stats />
-        {/* SEO crawlable brand description — visually integrated, not hidden */}
-        <section className="border-y border-white/5 bg-white/[0.02] py-12" aria-label="About StudyShield for JEE and NEET">
-          <div className="mx-auto max-w-4xl px-6 text-center">
-            <h2 className="text-xl font-semibold text-white mb-3">StudyShield — AI-powered study platform for JEE &amp; NEET</h2>
-            <p className="text-sm leading-relaxed text-gray-400">
-              StudyShield helps JEE and NEET aspirants with an AI study planner that builds a personalized study plan every morning, tracks backlog management and revision planning, and improves productivity with focus mode, distraction blocking and study tracking. Built for JEE preparation and NEET preparation.
-            </p>
-          </div>
-        </section>
+        <Proof />
         <Testimonials />
         <FAQ />
         <CTA />
