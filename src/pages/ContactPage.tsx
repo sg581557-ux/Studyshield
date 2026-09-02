@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Mail, MessageSquare } from "lucide-react";
 import { PublicNavbar, PublicFooter } from "../components/public/PublicChrome";
+import { SEO, CANONICAL } from "../components/SEO";
 
 const CHANNELS = [
   {
@@ -22,6 +23,11 @@ const CHANNELS = [
 export default function ContactPage() {
   return (
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+      <SEO
+        title="Contact StudyShield – Support for JEE &amp; NEET Study Platform"
+        description="Questions about StudyShield for JEE &amp; NEET? Contact support@studyshield.study for help with AI study planner, backlog and focus features."
+        canonical={CANONICAL.contact}
+      />
       <PublicNavbar />
       <main className="pt-40 pb-32 px-6 max-w-4xl mx-auto">
         <div className="text-center mb-16">

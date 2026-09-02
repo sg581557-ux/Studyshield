@@ -8,6 +8,7 @@ import { Button } from "../components/ui";
 import { PasswordInput, PasswordRequirements } from "../components/auth/PasswordInput";
 import { passwordMeetsRequirements } from "../lib/passwordRules";
 import { GoogleSignInButton } from "../components/auth/GoogleSignInButton";
+import { SEO, CANONICAL } from "../components/SEO";
 
 export default function Signup() {
   const { signUp, signInWithGoogle } = useAuth();
@@ -63,6 +64,7 @@ export default function Signup() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-ink-950">
+      <SEO title="Create your StudyShield account – AI Planner for JEE &amp; NEET" description="Join StudyShield for AI-powered JEE &amp; NEET preparation. Get personalized study plans, backlog tracking and focus tools." canonical={CANONICAL.signup} robots="index, follow" />
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
           <div className="w-12 h-12 rounded-2xl bg-accent-600/20 flex items-center justify-center mb-3"><ShieldCheck className="w-6 h-6 text-accent-400" /></div>

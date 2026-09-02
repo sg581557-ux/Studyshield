@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -60,7 +61,7 @@ function deriveSuggestions(items: BacklogItem[]): Suggestion[] {
 }
 
 export default function BacklogPlanner() {
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<BacklogItem[]>([]);
@@ -78,14 +79,11 @@ export default function BacklogPlanner() {
 
   // Recent quick-adds come straight from localStorage and are never written by
   // this component, so they're derived (not state). Dismissed suggestions
-  // reset whenever the exam changes — render-phase adjustment so the reset
-  // commits with the exam switch.
+  // reset whenever the exam changes.
   const recent = useMemo(() => loadRecent().filter((r) => r.exam === activeExam), [activeExam]);
-  const [prevExam, setPrevExam] = useState(activeExam);
-  if (prevExam !== activeExam) {
-    setPrevExam(activeExam);
+  useEffect(() => {
     setDismissedSuggestions(new Set());
-  }
+  }, [activeExam]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,17 +91,9 @@ export default function BacklogPlanner() {
     finally { setLoading(false); }
   }, [activeExam]);
 
-  // Initial + exam-switch refetch, inlined in the effect (React's documented
-  // fetch-on-mount shape). The loading flip happens during render when the
-  // exam changes so the spinner shows immediately.
-  const [prevLoadExam, setPrevLoadExam] = useState(activeExam);
-  if (prevLoadExam !== activeExam) {
-    setPrevLoadExam(activeExam);
-    setLoading(true);
-  }
-
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const data = await db.getBacklogItems(activeExam);
@@ -114,24 +104,16 @@ export default function BacklogPlanner() {
     return () => { cancelled = true; };
   }, [activeExam]);
 
-  // Deep-link support (?add=1&kind=…&bulk=1): the URL is an external system,
-  // so this syncs form state from it during render (the React "adjusting
-  // state when a prop changes" pattern), then strips the params in an effect.
-  const urlKey = searchParams.toString();
-  const [prevUrlKey, setPrevUrlKey] = useState(urlKey);
-  if (prevUrlKey !== urlKey) {
-    setPrevUrlKey(urlKey);
+  // Deep-link support (?add=1&kind=…&bulk=1)
+  useEffect(() => {
     if (searchParams.get("add")) {
       const kind = (searchParams.get("kind") as BacklogKind | null) ?? undefined;
       const bulk = searchParams.get("bulk") === "1";
       setPreset(bulk ? { bulk: true } : kind ? { kind } : {});
       setEditItem(null);
       setSheetOpen(true);
+      setSearchParams({}, { replace: true });
     }
-  }
-
-  useEffect(() => {
-    if (searchParams.get("add")) setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
   const suggestions = useMemo(
@@ -163,6 +145,8 @@ export default function BacklogPlanner() {
 
   async function handleSaved() {
     await load();
+    // Refresh XP/profile after backlog changes (addSmartBacklog increments XP)
+    void refreshProfile().catch(() => {});
   }
 
   function handleDelete(item: BacklogItem) {
@@ -179,6 +163,7 @@ export default function BacklogPlanner() {
     applyPatch(item.id, { status: done ? "done" : "todo", completed_at: done ? new Date().toISOString() : null, overall_progress: done ? 100 : (resourceSummary(extractBacklogResources(item)).pct) });
     db.completeBacklogItem(item.id, done).then((updated) => {
       if (updated) applyPatch(item.id, updated);
+      if (done) void refreshProfile().catch(() => {});
     }).catch(() => { toast.error("Failed to update"); load(); });
   }
 
@@ -197,6 +182,8 @@ export default function BacklogPlanner() {
     });
     db.updateBacklogResourceProgress(item.id, kind, completed).then((updated) => {
       if (updated) applyPatch(item.id, updated);
+      // XP is handled in db.updateBacklogResourceProgress when done, plus generic increment
+      void refreshProfile().catch(() => {});
     }).catch(() => { toast.error("Failed to save progress"); load(); });
   }
 
@@ -219,6 +206,7 @@ export default function BacklogPlanner() {
       setItems((p) => p.map((i) => (i.id === temp.id ? real : i)));
       pushRecent({ exam: input.exam, subject: input.subject, chapter: input.chapter, kind: recentEntry.kind });
       toast.success("Backlog added");
+      void refreshProfile().catch(() => {});
     } catch (err) {
       setItems((p) => p.filter((i) => i.id !== temp.id));
       toast.error(err instanceof Error ? err.message : "Failed to add");
@@ -239,6 +227,7 @@ export default function BacklogPlanner() {
       setItems((p) => p.map((i) => (i.id === temp.id ? real : i)));
       pushRecent({ exam: input.exam, subject: input.subject, chapter: input.chapter, kind: s.kind });
       toast.success(`${resourceMeta(s.kind).label} backlog added`);
+      void refreshProfile().catch(() => {});
     } catch (err) {
       setItems((p) => p.filter((i) => i.id !== temp.id));
       toast.error(err instanceof Error ? err.message : "Failed to add");

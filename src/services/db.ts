@@ -518,6 +518,10 @@ export const db = {
         started_at: now, completed_at: completed ? now : null,
       }).select("*").maybeSingle();
       if (error) { console.error("[db.addFocusSession]", error); throw error; }
+      if (completed) {
+        // XP: 2 per minute (matches FocusTimer toast)
+        void this.incrementXP(Math.max(0, Math.round(durationMinutes * 2))).catch(() => { /* ignore */ });
+      }
       return (data as FocusSession) ?? null;
     } catch (err) { console.error("[db.addFocusSession] threw", err); throw err; }
   },
@@ -548,6 +552,7 @@ export const db = {
       const payload: Record<string, unknown> = {
         exam: aliasExamId(row.exam), subject: row.subject, chapter: row.chapter,
         status, confidence: row.confidence ?? 3, updated_at: new Date().toISOString(),
+        is_current: active,
       };
       if (seedLecture) payload.lectures_remaining = 2;
       const { data, error } = await c.from("user_chapters")
@@ -581,7 +586,10 @@ export const db = {
       const uc = existing.data as UserChapter | null;
 
       const ucPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (patch.status) ucPatch.status = patch.status;
+      if (patch.status) {
+        ucPatch.status = patch.status;
+        ucPatch.is_current = patch.status === "started" || patch.status === "in_progress";
+      }
       if (patch.lectures_remaining !== undefined) ucPatch.lectures_remaining = Math.max(0, Math.round(patch.lectures_remaining || 0));
       // Seeding: a chapter marked started/in_progress with no counters gets two
       // lectures so the planner schedules its 2/day minimum (column default is 0).
@@ -607,6 +615,7 @@ export const db = {
         const { error } = await c.from("user_chapters").insert({
           exam: examKey, subject, chapter,
           status: patch.status ?? "not_started",
+          is_current: activeStatus,
           lectures_remaining: lectureDefault ? 2 : Math.max(0, Math.round(patch.lectures_remaining ?? 0)),
           questions_remaining: Math.max(0, Math.round(patch.questions_remaining ?? 0)),
           revision_pending: Math.max(0, Math.round(patch.revision_pending ?? 0)),
@@ -813,22 +822,64 @@ export const db = {
 
   /**
    * Fetches the user's backlog items. When an exam key is provided the rows
-   * are filtered at the database level (`exam_id.in(...)`) so no other exam's
-   * data is ever loaded. Rows with a null exam_id (legacy items created before
-   * exam tagging) are included — they cannot be attributed to another exam.
+   * are filtered at the database level so no other exam's data is ever loaded.
+   * Rows with a null exam_id (legacy items created before exam tagging) are
+   * included — they cannot be attributed to another exam.
+   * Fixed: previously used unquoted `exam_id.in.(a,b)` which fails for text
+   * values with hyphens/spaces; now uses proper `in` filter plus separate null
+   * query and merges results to avoid PostgREST quoting bugs.
    */
   async getBacklogItems(examKey?: string | null): Promise<BacklogItem[]> {
     const c = assertClient();
     try {
-      let q = c.from("backlog_items").select("*");
-      if (examKey) {
-        const ids = examIdMatchSet(backlogExamFamily(examKey));
-        q = q.or(`exam_id.in.(${ids.join(",")}),exam_id.is.null`);
+      if (!examKey) {
+        const { data, error } = await c.from("backlog_items").select("*").order("created_at", { ascending: false });
+        if (error) console.error("[db.getBacklogItems]", error);
+        return assertRows<BacklogItem>(data, "getBacklogItems");
       }
-      const { data, error } = await q.order("created_at", { ascending: false });
-      if (error) console.error("[db.getBacklogItems]", error);
-      return assertRows<BacklogItem>(data, "getBacklogItems");
+      const ids = examIdMatchSet(backlogExamFamily(examKey));
+      // Use two queries to avoid PostgREST `or` quoting issues for text values
+      const [withExam, withNull] = await Promise.all([
+        c.from("backlog_items").select("*").in("exam_id", ids).order("created_at", { ascending: false }),
+        c.from("backlog_items").select("*").is("exam_id", null).order("created_at", { ascending: false }),
+      ]);
+      if (withExam.error) console.error("[db.getBacklogItems] withExam", withExam.error);
+      if (withNull.error) console.error("[db.getBacklogItems] withNull", withNull.error);
+      const merged = [...assertRows<BacklogItem>(withExam.data, "getBacklogItems.withExam"), ...assertRows<BacklogItem>(withNull.data, "getBacklogItems.withNull")];
+      // Deduplicate and sort by created_at desc
+      const seen = new Set<string>();
+      const deduped: BacklogItem[] = [];
+      for (const item of merged.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))) {
+        if (!seen.has(item.id)) { seen.add(item.id); deduped.push(item); }
+      }
+      return deduped;
     } catch (err) { console.error("[db.getBacklogItems] threw", err); return []; }
+  },
+
+  /** Increment XP for the current user. Silently handles missing xp column (PGRST204) by logging. */
+  async incrementXP(amount: number): Promise<void> {
+    if (amount <= 0) return;
+    const c = assertClient();
+    try {
+      const sessionUser = await currentSessionUser();
+      if (!sessionUser) return;
+      // Fetch current XP
+      const { data, error: fetchError } = await c.from("profiles").select("xp").eq("id", sessionUser.id).maybeSingle();
+      if (fetchError) {
+        const missing = missingColumnFromError(fetchError);
+        if (missing) console.warn(`[db.incrementXP] missing column ${missing} — run supabase/profiles_fix_columns.sql`, fetchError);
+        else console.error("[db.incrementXP] fetch", fetchError);
+        return;
+      }
+      const current = (data as { xp?: number } | null)?.xp ?? 0;
+      const next = current + amount;
+      const { error } = await c.from("profiles").update({ xp: next, updated_at: new Date().toISOString() }).eq("id", sessionUser.id);
+      if (error) {
+        const missing = missingColumnFromError(error);
+        if (missing) console.warn(`[db.incrementXP] missing column ${missing}`, error);
+        else console.error("[db.incrementXP] update", error);
+      }
+    } catch (err) { console.error("[db.incrementXP] threw", err); }
   },
 
   async addBacklogItem(row: { title: string; subject?: string | null; chapter?: string | null; priority: Priority }): Promise<BacklogItem> {
@@ -909,6 +960,8 @@ export const db = {
       if (error) { console.error("[db.addSmartBacklog]", error); throw error; }
       const item = (data as BacklogItem) ?? null;
       if (!item) throw new Error("Failed to create backlog item");
+      // Award XP for adding a backlog (10 XP)
+      void this.incrementXP(10).catch(() => { /* ignore */ });
       return item;
     } catch (err) { console.error("[db.addSmartBacklog] threw", err); throw err; }
   },
@@ -942,6 +995,8 @@ export const db = {
       patch.completed_at = patch.status === "done" ? new Date().toISOString() : null;
       const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
       if (error) { console.error("[db.updateBacklogResourceProgress] update", error); throw error; }
+      if (patch.status === "done") void this.incrementXP(20).catch(() => { /* ignore */ });
+      else void this.incrementXP(5).catch(() => { /* ignore */ });
       return (data as BacklogItem) ?? null;
     } catch (err) { console.error("[db.updateBacklogResourceProgress] threw", err); throw err; }
   },
@@ -962,6 +1017,7 @@ export const db = {
       };
       const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
       if (error) { console.error("[db.completeBacklogItem] update", error); throw error; }
+      if (done) void this.incrementXP(50).catch(() => { /* ignore */ });
       return (data as BacklogItem) ?? null;
     } catch (err) { console.error("[db.completeBacklogItem] threw", err); throw err; }
   },
@@ -1033,6 +1089,7 @@ export const db = {
       } else if (cur.status === "not_started") {
         update.status = "in_progress" as ChapterStatus;
       }
+      update.is_current = update.status === "started" || update.status === "in_progress";
       const { error } = await c.from("user_chapters").update(update).eq("id", cur.id);
       if (error) console.error("[db.updateUserChapterProgress] update", error);
     } catch (e) { console.error("[db.updateUserChapterProgress] threw", e); }
@@ -1303,4 +1360,8 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus, actua
   if (actualMinutes !== undefined) patch.actual_minutes = actualMinutes;
   const { error } = await c.from("plan_tasks").update(patch).eq("id", taskId);
   if (error) throw error;
+  if (status === "completed") {
+    // XP for completing a task (50 XP)
+    try { await db.incrementXP(50); } catch { void 0; }
+  }
 }

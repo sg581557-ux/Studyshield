@@ -1,4 +1,5 @@
 import { PublicNavbar, PublicFooter } from "../components/public/PublicChrome";
+import { SEO, CANONICAL } from "../components/SEO";
 
 const SECTIONS = [
   {
@@ -42,6 +43,11 @@ const SECTIONS = [
 export default function PrivacyPage() {
   return (
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+      <SEO
+        title="Privacy Policy – StudyShield"
+        description="Read StudyShield's Privacy Policy. How we handle data for JEE &amp; NEET study planning, backlog and focus features."
+        canonical={CANONICAL.privacy}
+      />
       <PublicNavbar />
       <main className="pt-40 pb-32 px-6 max-w-3xl mx-auto">
         <div className="mb-12">

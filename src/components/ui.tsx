@@ -1,10 +1,10 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { useEffect, useId, useRef } from "react";
 import { motion } from "framer-motion";
 import { Loader2, X } from "lucide-react";
 import { cn } from "../lib/utils";
 
-type Variant = "primary" | "ghost" | "danger";
+type Variant = "primary" | "ghost" | "danger" | "outline";
 type Size = "sm" | "md" | "lg";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -18,12 +18,13 @@ export function Button({ variant = "primary", size = "md", loading = false, clas
     primary: "btn-primary bg-accent-600 text-white hover:bg-accent-500",
     ghost: "bg-white/5 text-slate-200 hover:bg-white/10 border border-white/10",
     danger: "btn-danger bg-danger-600 text-white hover:bg-danger-500",
+    outline: "border border-white/10 text-slate-200 hover:bg-white/5 hover:border-white/20",
   };
   return <button className={cn(base, sizes[size], variants[variant], className)} disabled={disabled || loading} {...rest}>{loading && <Loader2 className="w-4 h-4 animate-spin" />}{children}</button>;
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("rounded-2xl bg-ink-900 border border-white/10", className)}>{children}</div>;
+export function Card({ children, className, ...rest }: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("rounded-2xl bg-ink-900 border border-white/10", className)} {...rest}>{children}</div>;
 }
 export function CardBody({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("p-5", className)}>{children}</div>;

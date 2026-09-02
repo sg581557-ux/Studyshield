@@ -1,4 +1,5 @@
 import { PublicNavbar, PublicFooter } from "../components/public/PublicChrome";
+import { SEO, CANONICAL } from "../components/SEO";
 
 const SECTIONS = [
   {
@@ -54,6 +55,11 @@ const SECTIONS = [
 export default function TermsPage() {
   return (
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+      <SEO
+        title="Terms of Service – StudyShield"
+        description="Read StudyShield's Terms of Service for the AI study planner and focus platform for JEE &amp; NEET preparation."
+        canonical={CANONICAL.terms}
+      />
       <PublicNavbar />
       <main className="pt-40 pb-32 px-6 max-w-3xl mx-auto">
         <div className="mb-12">

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Brain, Clock, ShieldCheck, Target } from "lucide-react";
 import { PublicNavbar, PublicFooter } from "../components/public/PublicChrome";
+import { SEO, CANONICAL } from "../components/SEO";
 
 const VALUES = [
   { icon: <Brain />, title: "AI-First", desc: "Every feature is designed to remove planning friction so you can spend your energy on studying, not scheduling." },
@@ -12,6 +13,11 @@ const VALUES = [
 export default function AboutPage() {
   return (
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+      <SEO
+        title="About StudyShield – AI Study Platform Built for JEE &amp; NEET Aspirants"
+        description="Learn how StudyShield helps JEE &amp; NEET students with an AI study planner for personalized study plans, backlog management, revision planning and focus."
+        canonical={CANONICAL.about}
+      />
       <PublicNavbar />
       <main className="pt-40 pb-32 px-6 max-w-4xl mx-auto">
         <div className="text-center mb-16">

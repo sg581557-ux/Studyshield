@@ -275,15 +275,29 @@ html.light [class*="bg-danger-600"][class*="text-white"] {
 /* ============================================================
    Public marketing pages (Landing/About/Contact/Privacy/Terms)
    are permanently dark by design. The .light theme flips
-   text-white/slate-* to dark colors globally — restore them
-   inside .public-site so the public pages never break.
+   text-white, slate-* and gray-* colors to dark globally —
+   restore them inside .public-site so the public pages never
+   break.
    ============================================================ */
+/* The root container carries BOTH .public-site and .text-white on the SAME
+   element — the descendant selector below can never match it, so restore
+   the base color on the container itself. */
+html.light .public-site,
+html.light .public-site.text-white { color: #ffffff; }
 html.light .public-site .text-white { color: #ffffff; }
 html.light .public-site .text-slate-100 { color: #f1f5f9; }
 html.light .public-site .text-slate-200 { color: #e2e8f0; }
 html.light .public-site .text-slate-300 { color: #cbd5e1; }
 html.light .public-site .text-slate-400 { color: #94a3b8; }
 html.light .public-site .text-slate-500 { color: #64748b; }
+/* Gray text scale used across the public pages (restores the dark-theme
+   values that the global light overrides would otherwise flip). */
+html.light .public-site .text-gray-100 { color: #f3f4f6; }
+html.light .public-site .text-gray-200 { color: #e5e7eb; }
+html.light .public-site .text-gray-300 { color: #d1d5db; }
+html.light .public-site .text-gray-400 { color: #9ca3af; }
+html.light .public-site .text-gray-500 { color: #6b7280; }
+html.light .public-site .text-gray-600 { color: #4b5563; }
 html.light .public-site [class*="bg-white/5"],
 html.light .public-site [class*="bg-white/[0.02]"],
 html.light .public-site [class*="bg-white/[0.03]"],
@@ -362,8 +376,58 @@ html.dark .katex {
   color: #e2e8f0; /* slate-200 */
 }
 
+/* ============================================================
+   Markdown rendering (AI Mentor, etc.)
+   ============================================================ */
+
+/* Fenced code blocks: neutralize inline-code pill styling inside
+   <pre> so plain fences (no language tag) render like blocks. */
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* Block equations: breathe above/below, never overflow the card. */
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0.75rem 0;
+  padding: 0.125rem 0.25rem;
+  max-width: 100%;
+  scrollbar-width: thin;
+}
+
+/* Inline math keeps baseline rhythm and never stretches the bubble. */
+.markdown-body .katex {
+  font-size: 1.05em;
+  max-width: 100%;
+}
+
+/* Tables: keep text readable in light mode. */
+html.light .markdown-body table {
+  color: #1f2937;
+}
+html.light .markdown-body th {
+  color: #111827;
+}
+
 /* Voice Mentor waveform bars */
 @keyframes eq {
   0%, 100% { height: 25%; }
   50% { height: 100%; }
+}
+
+/* AI Mentor: streaming caret shown while a reply is being revealed */
+@keyframes chat-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.chat-caret::after {
+  content: "▍";
+  margin-left: 1px;
+  color: rgb(var(--accent-400));
+  animation: chat-caret-blink 1s step-end infinite;
 }

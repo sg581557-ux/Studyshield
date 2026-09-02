@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { db } from "../services/db";
 import { Button } from "../components/ui";
+import { SEO } from "../components/SEO";
 import { friendlySaveError } from "../lib/authErrors";
 import {
   CURRENT_LEVELS, PRIMARY_GOALS,
@@ -325,6 +326,7 @@ export default function Onboarding() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-ink-950 py-8">
+      <SEO robots="noindex, nofollow" />
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg">
         <div className="flex flex-col items-center mb-6">
           <div className="w-12 h-12 rounded-2xl bg-accent-600/20 flex items-center justify-center mb-3"><ShieldCheck className="w-6 h-6 text-accent-400" /></div>

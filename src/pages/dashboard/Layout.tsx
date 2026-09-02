@@ -6,6 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import { levelFromXP } from "../../lib/constants";
 import ChapterProgressReminder from "../../components/ChapterProgressReminder";
+import { SEO } from "../../components/SEO";
 
 const NAV = [
   { to: "/dashboard", end: true, label: "Home", icon: LayoutDashboard },
@@ -125,6 +126,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-ink-950 flex">
+      <SEO robots="noindex, nofollow" />
       <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-white/5 bg-ink-900">{navContent}</aside>
       <AnimatePresence>
         {mobileOpen && (

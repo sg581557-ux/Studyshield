@@ -1,0 +1,17 @@
+# Cloudflare Workers / Pages redirect rules
+# SPA fallback is handled by the Worker (single-page-application). These rules run before fallback.
+# Workers.dev -> canonical domain (requires Cloudflare dashboard Bulk Redirect for true 301; JS fallback in index.html handles client-side)
+# Legacy /app/* paths are also handled client-side via React Router <Navigate>; these edge redirects provide 301 for crawlers.
+# Uncomment if your platform respects _redirects for host-level redirects:
+
+/app/planner  /planner  301
+/app/mentor  /mentor  301
+/app/backlog  /backlogs  301
+/app/recovery  /recovery  301
+/app/subjects  /subjects  301
+/app/formulas  /vault  301
+/app/timer  /timer  301
+/app/analytics  /analytics  301
+/app/settings  /settings  301
+/app/preferences  /preferences  301
+/app  /dashboard  301

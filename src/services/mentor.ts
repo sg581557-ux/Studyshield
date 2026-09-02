@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { todayISODate } from "../lib/constants";
 import { db, statsDb, recoveryDb, goalsDb } from "./db";
 import { revisionDue } from "./planner/revisionEngine";
+import { stripImageMarkers } from "../lib/imageUtils";
 import type { DailyPlanInputs, PlanTask, PlannerGoal, Profile, StudyStats, UserChapter } from "../lib/types";
 
 // ============================================================
@@ -140,6 +141,51 @@ export interface MentorReplyResult {
   reason?: string;
   /** Language the mentor actually replied in (detected + preference). */
   language?: string;
+  /** Validated plan-change proposal (AI Mentor → AI Planner), if the
+   *  conversation justified one. The app executes it via the planner
+   *  service and shows a "Planner updated" notification. */
+  planner?: PlannerChange | null;
+}
+
+/** One operation of a mentor-proposed plan change. */
+export interface PlannerChangeOp {
+  op:
+    | "regenerate_plan"
+    | "reschedule_task"
+    | "add_task"
+    | "remove_task"
+    | "update_task_priority"
+    | "update_availability";
+  date?: string;
+  from_date?: string;
+  to_date?: string;
+  task_title?: string;
+  title?: string;
+  subject?: string;
+  chapter?: string;
+  task_type?: string;
+  estimated_minutes?: number;
+  start_time?: string;
+  priority?: string;
+  study_hours?: number;
+  energy_level?: string;
+  was_school_day?: boolean;
+  exam_tomorrow?: boolean;
+}
+
+/** Validated plan-change proposal returned by mentor-chat. */
+export interface PlannerChange {
+  id: string;
+  reason: string;
+  changes: PlannerChangeOp[];
+}
+
+/** Image bytes attached to a request. Keyed by the marker id used in the
+ *  message content (`[IMAGE:id]`). Sent to the vision model as ephemeral
+ *  data URLs — never stored server-side. */
+export interface MentorImageData {
+  dataUrl: string;
+  alt?: string;
 }
 
 // ============================================================
@@ -222,7 +268,7 @@ export async function buildMentorContext(_userId: string, profile: Profile | nul
     }
     b.total += 1;
     if (doneStates.has(c.status)) b.completed += 1;
-    else if (c.status === "in_progress" || c.status === "started") b.inProgress += 1;
+    else if (c.is_current ?? (c.status === "in_progress" || c.status === "started")) b.inProgress += 1;
     else b.notStarted += 1;
     b.pendingLectures += c.lectures_remaining ?? 0;
     b.pendingQuestions += c.questions_remaining ?? 0;
@@ -313,7 +359,7 @@ export async function buildMentorContext(_userId: string, profile: Profile | nul
     chapters: {
       total: chapters.length,
       completed: chapters.filter((c) => doneStates.has(c.status)).length,
-      inProgress: chapters.filter((c) => c.status === "in_progress" || c.status === "started").length,
+      inProgress: chapters.filter((c) => c.is_current ?? (c.status === "in_progress" || c.status === "started")).length,
       notStarted: chapters.filter((c) => c.status === "not_started").length,
       pendingLectures: activeChapters.reduce((s, c) => s + (c.lectures_remaining ?? 0), 0),
       pendingQuestions: activeChapters.reduce((s, c) => s + (c.questions_remaining ?? 0), 0),
@@ -463,11 +509,13 @@ export async function sendMentorMessage(
   userText: string,
   history: MentorChatMessage[],
   context: MentorContext,
-  opts?: { persistUser?: boolean },
+  opts?: { persistUser?: boolean; plannerEnabled?: boolean },
   language?: string,
+  images?: Record<string, MentorImageData>,
 ): Promise<MentorReplyResult> {
   const trimmedText = userText.trim();
   const persistUser = opts?.persistUser !== false;
+  const plannerEnabled = opts?.plannerEnabled !== false;
 
   if (!supabase) {
     throw new MentorError("network", "App database connection is unavailable. Check your internet connection and retry.", { retryable: true });
@@ -476,7 +524,7 @@ export async function sendMentorMessage(
   if (persistUser) {
     await addMentorMessage(threadId, "user", trimmedText);
     if (history.length === 0) {
-      await updateThreadTitleIfDefault(threadId, threadTitle, trimmedText);
+      await updateThreadTitleIfDefault(threadId, threadTitle, stripImageMarkers(trimmedText));
     }
   }
 
@@ -493,23 +541,29 @@ export async function sendMentorMessage(
           context,
           messages: [...history, { role: "user", content: trimmedText }],
           ...(language ? { language } : {}),
+          ...(images && Object.keys(images).length > 0 ? { images } : {}),
+          threadId,
+          plannerEnabled,
         },
       });
       if (error) throw error;
       const reply: string = data?.reply ?? "";
       if (!reply) throw new Error("Empty mentor reply");
       await addMentorMessage(threadId, "assistant", reply);
-      return { reply, source: "llm", language: (data?.language as string | undefined) ?? language };
+      const planner = (data?.planner as PlannerChange | null | undefined) ?? null;
+      return { reply, source: "llm", language: (data?.language as string | undefined) ?? language, planner };
     } catch (raw) {
       const err = await classifyMentorError(raw);
       console.error(
         `[mentor] send failed kind=${err.kind} status=${err.status ?? "n/a"} thread=${threadId} ` +
-        `messages=${history.length + 1} lastUser="${trimmedText.slice(0, 100)}" msg="${err.message}"`,
+        `messages=${history.length + 1} images=${images ? Object.keys(images).length : 0} ` +
+        `lastUser="${trimmedText.slice(0, 100)}" msg="${err.message}"`,
       );
       // Service genuinely unavailable (not deployed / no API key): fall back to
       // the deterministic offline mentor, and report the real reason.
       if (err.kind === "not_deployed" || err.kind === "not_configured") {
-        const reply = fallbackMentorReply(trimmedText, context);
+        const hasImages = !!images && Object.keys(images).length > 0;
+        const reply = hasImages ? imageOfflineReply() : fallbackMentorReply(trimmedText, context);
         await addMentorMessage(threadId, "assistant", reply);
         return { reply, source: "offline", reason: err.message };
       }
@@ -522,6 +576,14 @@ export async function sendMentorMessage(
       throw err;
     }
   }
+}
+
+/** Canned reply when the live AI service is unavailable for image solving. */
+function imageOfflineReply(): string {
+  return [
+    "**Direct Answer**\nI can't analyze images right now — the live AI Mentor service isn't reachable, and image solving needs it.",
+    "**What to do**\n1. Make sure the `mentor-chat` Supabase edge function is deployed.\n2. Set an `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`) secret on it.\n3. Try again — your question is saved in this chat.",
+  ].join("\n\n");
 }
 
 // ============================================================

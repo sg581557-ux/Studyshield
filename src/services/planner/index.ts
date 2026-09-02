@@ -222,7 +222,7 @@ function getActiveChapters(
       progressPct: chapterProgressPct(uc),
       backlogItem,
       isWeak: uc.status !== "completed" && uc.status !== "mastered" && (uc.confidence ?? 3) <= WEAK_CONFIDENCE,
-      inClassNow: uc.status === "in_progress" || uc.status === "started",
+      inClassNow: uc.is_current ?? (uc.status === "in_progress" || uc.status === "started"),
     };
   }).sort((a, b) => {
     if (a.progressPct >= ACTIVE_CHAPTER_PROGRESS_THRESHOLD && b.progressPct < ACTIVE_CHAPTER_PROGRESS_THRESHOLD) return -1;
@@ -1085,7 +1085,7 @@ export async function onTaskCompleted(task: PlanTask): Promise<void> {
             // Chapter still being studied (started/in_progress) with no question
             // work yet: keep two lectures queued so the planner schedules its
             // 2/day minimum while the user is doing the chapter.
-            if (remaining < 2 && (uc.status === "started" || uc.status === "in_progress") && (uc.questions_remaining ?? 0) <= 0) remaining = 2;
+            if (remaining < 2 && (uc.is_current ?? (uc.status === "started" || uc.status === "in_progress")) && (uc.questions_remaining ?? 0) <= 0) remaining = 2;
             patch.lectures_remaining = remaining;
           } else if (ref.field === "questions_remaining") patch.questions_remaining = Math.max(0, (uc.questions_remaining ?? 0) - decrement);
           else if (ref.field === "revision_pending") patch.revision_pending = Math.max(0, (uc.revision_pending ?? 0) - decrement);

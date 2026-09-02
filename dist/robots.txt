@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /
+
+# Disallow private / authenticated areas — crawlers don't need these
+Disallow: /dashboard
+Disallow: /planner
+Disallow: /backlogs
+Disallow: /recovery
+Disallow: /subjects
+Disallow: /vault
+Disallow: /timer
+Disallow: /analytics
+Disallow: /profile
+Disallow: /settings
+Disallow: /preferences
+Disallow: /mentor
+Disallow: /onboarding
+Disallow: /auth/
+Disallow: /app/
+
+Sitemap: https://studyshield.study/sitemap.xml

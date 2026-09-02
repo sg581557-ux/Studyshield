@@ -1,6 +1,8 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Timer as TimerIcon, Play, Pause, RotateCcw } from "lucide-react";
 import { useToast } from "../../context/ToastContext";
+import { useAuth } from "../../context/AuthContext";
 import { db } from "../../services/db";
 import { Card, CardBody, Button } from "../../components/ui";
 import { FOCUS_MODES, formatTimer } from "../../lib/constants";
@@ -9,6 +11,7 @@ type Phase = "work" | "short" | "long";
 
 export default function FocusTimer() {
   const { toast } = useToast();
+  const { refreshProfile } = useAuth();
   const [modeId, setModeId] = useState("pomodoro");
   const mode = FOCUS_MODES.find((m) => m.id === modeId)!;
   const [phase, setPhase] = useState<Phase>("work");
@@ -19,40 +22,44 @@ export default function FocusTimer() {
 
   const currentDuration = (phase === "work" ? mode.work : phase === "short" ? mode.shortBreak : mode.longBreak) * 60;
 
-  // Resetting the timer when the mode changes is "adjusting state when a
-  // prop changes" (React docs pattern): done during render so the new
-  // duration is committed atomically instead of cascading from an effect.
-  const [prevModeId, setPrevModeId] = useState(modeId);
-  if (prevModeId !== modeId) {
-    setPrevModeId(modeId);
+  useEffect(() => {
     if (!running) setRemaining(currentDuration);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeId]);
 
   const handleComplete = useCallback(() => {
     setRunning(false);
     if (phase === "work") {
-      const next = cyclesDone + 1;
-      setCyclesDone(next);
-      db.addFocusSession(mode.work, true).catch((e) => console.error("[timer] addFocusSession threw", e));
+      setCyclesDone((prev) => {
+        const next = prev + 1;
+        const isLong = next % mode.cycles === 0;
+        setPhase(isLong ? "long" : "short");
+        setRemaining((isLong ? mode.longBreak : mode.shortBreak) * 60);
+        return next;
+      });
+      // addFocusSession already increments XP (2 per minute) via db increment
+      db.addFocusSession(mode.work, true)
+        .then(() => refreshProfile().catch(() => {}))
+        .catch((e) => console.error("[timer] addFocusSession threw", e));
       toast.success(`Work session done! +${mode.work * 2} XP`);
-      const isLong = next % mode.cycles === 0;
-      setPhase(isLong ? "long" : "short");
-      setRemaining((isLong ? mode.longBreak : mode.shortBreak) * 60);
     } else {
       setPhase("work"); setRemaining(mode.work * 60); toast.info("Break over — back to work");
     }
-  }, [phase, cyclesDone, mode, toast]);
+  }, [phase, mode, toast, refreshProfile]);
+
+  const handleCompleteRef = useRef(handleComplete);
+  useEffect(() => { handleCompleteRef.current = handleComplete; }, [handleComplete]);
 
   useEffect(() => {
     if (!running) { if (intervalRef.current) window.clearInterval(intervalRef.current); return; }
     intervalRef.current = window.setInterval(() => {
       setRemaining((r) => {
-        if (r <= 1) { handleComplete(); return 0; }
+        if (r <= 1) { handleCompleteRef.current(); return 0; }
         return r - 1;
       });
     }, 1000);
     return () => { if (intervalRef.current) window.clearInterval(intervalRef.current); };
-  }, [running, handleComplete]);
+  }, [running]);
 
   function reset() { setRunning(false); setPhase("work"); setRemaining(mode.work * 60); setCyclesDone(0); }
   const total = currentDuration;

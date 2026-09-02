@@ -15,6 +15,7 @@ import {
   ListTodo,
 } from 'lucide-react';
 import { PublicNavbar, PublicFooter } from '../components/public/PublicChrome';
+import { SEO, DEFAULT_TITLE, DEFAULT_DESCRIPTION, CANONICAL } from '../components/SEO';
 
 const AIPlannerShowcase = lazy(() => import('./components/AIPlannerShowcase'));
 const AIMentorShowcase = lazy(() => import('./components/AIMentorShowcase'));
@@ -71,12 +72,15 @@ const Hero = () => {
           transition={{ duration: 0.8 }}
           className="flex flex-col gap-6"
         >
+          <p className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-4 py-1.5 text-xs font-semibold tracking-widest text-blue-300">
+            StudyShield — AI-powered study platform for JEE &amp; NEET students
+          </p>
           <h1 className="text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight">
             Stop Fighting Distractions. <br/>
             <GradientText>Start Winning Exams.</GradientText>
           </h1>
           <p className="text-lg text-gray-400 max-w-xl leading-relaxed">
-            The AI-powered study operating system that plans your day, tracks your progress, manages backlog, and keeps you focused.
+            StudyShield is an AI study planner for JEE preparation and NEET preparation — a personalized study plan that manages backlog, handles revision planning, and keeps you focused with distraction blocking and study tracking.
           </p>
           <div className="flex justify-start pt-4">
             <Link to="/signup" className="px-8 py-4 rounded-full bg-white text-black font-semibold hover:bg-gray-200 transition-colors flex items-center gap-2">
@@ -416,6 +420,59 @@ const CTA = () => (
 export default function Landing() {
   return (
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
+      <SEO
+        title={DEFAULT_TITLE}
+        description={DEFAULT_DESCRIPTION}
+        canonical={CANONICAL.home}
+        jsonLd={[
+          {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "StudyShield",
+            "url": "https://studyshield.study/",
+            "logo": "https://studyshield.study/shield.svg",
+            "sameAs": []
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "StudyShield",
+            "url": "https://studyshield.study/",
+            "inLanguage": "en-IN"
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "StudyShield",
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "Web",
+            "url": "https://studyshield.study/",
+            "description": "StudyShield is an AI-powered study platform for JEE and NEET students offering personalized study plans, backlog management, revision planning, focus timer, distraction blocking and study tracking.",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Is StudyShield only for JEE and NEET?",
+                "acceptedAnswer": { "@type": "Answer", "text": "While StudyShield is currently optimized for JEE and NEET, the AI Planner and focus tools work well for any competitive exam student." }
+              },
+              {
+                "@type": "Question",
+                "name": "How does the AI Planner work?",
+                "acceptedAnswer": { "@type": "Answer", "text": "The AI Planner uses your selected syllabus, pending backlog, and daily available hours to generate a mathematically optimized schedule that ensures maximum coverage before your exam day." }
+              },
+              {
+                "@type": "Question",
+                "name": "Can I use it on mobile?",
+                "acceptedAnswer": { "@type": "Answer", "text": "Yes, StudyShield is fully responsive and works as a progressive web app (PWA) on all mobile devices, including a native-like experience on iOS and Android." }
+              }
+            ]
+          }
+        ]}
+      />
       <PublicNavbar />
       <main>
         <Hero />
@@ -429,6 +486,15 @@ export default function Landing() {
           <AIMentorShowcase />
         </Suspense>
         <Stats />
+        {/* SEO crawlable brand description — visually integrated, not hidden */}
+        <section className="border-y border-white/5 bg-white/[0.02] py-12" aria-label="About StudyShield for JEE and NEET">
+          <div className="mx-auto max-w-4xl px-6 text-center">
+            <h2 className="text-xl font-semibold text-white mb-3">StudyShield — AI-powered study platform for JEE &amp; NEET</h2>
+            <p className="text-sm leading-relaxed text-gray-400">
+              StudyShield helps JEE and NEET aspirants with an AI study planner that builds a personalized study plan every morning, tracks backlog management and revision planning, and improves productivity with focus mode, distraction blocking and study tracking. Built for JEE preparation and NEET preparation.
+            </p>
+          </div>
+        </section>
         <Testimonials />
         <FAQ />
         <CTA />

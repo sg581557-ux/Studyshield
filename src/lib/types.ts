@@ -209,6 +209,8 @@ export interface UserChapter {
   status: ChapterStatus; lectures_remaining: number; questions_remaining: number;
   revision_pending: number; confidence: number; created_at: string; updated_at: string;
   progress: Record<string, unknown>;
+  /** Explicit "currently being studied" flag, kept in sync with status started/in_progress. */
+  is_current?: boolean;
 }
 
 export interface SyllabusExam { id: string; name: string; category: string; }

@@ -5,6 +5,7 @@ import { ShieldCheck, Mail } from "lucide-react";
 import { useAuth, authErrorMessage } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { Button } from "../components/ui";
+import { SEO, CANONICAL } from "../components/SEO";
 import { PasswordInput } from "../components/auth/PasswordInput";
 import { GoogleSignInButton } from "../components/auth/GoogleSignInButton";
 
@@ -46,6 +47,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-ink-950">
+      <SEO title="Sign in to StudyShield – AI Study Planner for JEE &amp; NEET" description="Sign in to StudyShield to access your personalized AI study plan, backlog and revision tracking for JEE &amp; NEET." canonical={CANONICAL.login} robots="index, follow" />
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
           <div className="w-12 h-12 rounded-2xl bg-accent-600/20 flex items-center justify-center mb-3"><ShieldCheck className="w-6 h-6 text-accent-400" /></div>

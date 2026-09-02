@@ -63,6 +63,9 @@ const BREAK_MIN = 10;
 const BREAK_EVERY_MIN = 80;
 const MODULE_CHUNK_QS = 20;
 const WEAK_CONFIDENCE = 2;
+// Extra lectures for the current chapter beyond the 2/day base, scaled by how
+// much lecture backlog the user has (1 extra per ~2 pending backlog lectures).
+const MAX_CURRENT_LECTURE_EXTRA = 4;
 
 // Spaced repetition intervals (1, 3, 7, 15, 30 days per spec)
 const REVISION_INTERVALS = [1, 3, 7, 15, 30];
@@ -183,7 +186,7 @@ function getActiveChapters(
       progressPct: chapterProgressPct(uc),
       backlogItem,
       isWeak: uc.status !== "completed" && uc.status !== "mastered" && (uc.confidence ?? 3) <= WEAK_CONFIDENCE,
-      inClassNow: uc.status === "in_progress" || uc.status === "started",
+      inClassNow: uc.is_current ?? (uc.status === "in_progress" || uc.status === "started"),
     };
   }).sort((a, b) => {
     if (a.progressPct >= 0.6 && b.progressPct < 0.6) return -1;
@@ -301,16 +304,38 @@ function buildWeeklyTest(profile: Profile, date: string): PlannedTask | null {
 }
 
 // Recorded-class students: auto-schedule their lectures (duration + count per
-// day from the profile) on the current chapter. The planner's slot-aware
-// scheduling then places them in the user's preferred study time slot.
-function buildRecordedLectures(profile: Profile, activeChapters: ActiveChapter[]): PlannedTask[] {
-  if (profile.class_mode !== "recorded" || !profile.coaching_enabled) return [];
-  const count = Math.max(1, Math.min(6, profile.lectures_per_day ?? 2));
-  const dur = Math.max(15, Math.min(240, profile.lecture_duration ?? 60));
-  const ac = activeChapters.find((a) => a.inClassNow) ?? activeChapters[0] ?? null;
+// day from the profile). Recorded mode alone means lectures to watch — no
+// coaching_enabled gate, so a recorded student always gets lectures even when
+// live-coaching is disabled. Lectures rotate across subjects: the current
+// chapter first, then the other active chapters (priority-ranked), so a
+// student with multiple active chapters never watches the same subject twice
+// in a row. The planner's slot-aware scheduling then places them in the user's
+// preferred study time slot. Each lecture is shrunk (floor 30 min) so all
+// `count` lectures fit the day.
+function buildRecordedLectures(profile: Profile, activeChapters: ActiveChapter[], schedulableMinutes: number): PlannedTask[] {
+  if (profile.class_mode !== "recorded") return [];
+  const count = Math.max(2, Math.min(6, profile.lectures_per_day ?? 2));
+  const raw = Math.max(15, Math.min(240, profile.lecture_duration ?? 60));
+  const dur = Math.min(raw, Math.max(30, Math.floor(schedulableMinutes / count)));
+
+  // Rotation pool: current chapters first, then the rest of the active
+  // chapters (already ranked by priority).
+  const candidates = [
+    ...activeChapters.filter((a) => a.inClassNow),
+    ...activeChapters.filter((a) => !a.inClassNow),
+  ];
+
   const tasks: PlannedTask[] = [];
   for (let i = 0; i < count; i++) {
+    let ac = candidates.length > 0 ? candidates[i % candidates.length] : null;
     if (ac) {
+      // Never schedule two recorded lectures from the same subject back to
+      // back — step to another subject when one is available.
+      const prev = tasks[tasks.length - 1];
+      if (prev?.subject && prev.subject === ac.subject) {
+        const otherSubject = candidates.find((c) => c.subject !== prev.subject);
+        if (otherSubject) ac = otherSubject;
+      }
       tasks.push({
         title: `Recorded lecture: ${ac.subject} — ${ac.chapter}`,
         subject: ac.subject, type: "lecture", estimated_minutes: dur,
@@ -333,10 +358,11 @@ function buildRecordedLectures(profile: Profile, activeChapters: ActiveChapter[]
 
 /**
  * Determine the user's coaching type from their profile.
- * Defaults to "online" if not set (backward compatible).
+ * Reads `coaching_type` (onboarding) and falls back to `coaching_mode`
+ * (Academic Preferences), defaulting to "online" if not set.
  */
 export function getCoachingType(profile: Profile): CoachingType {
-  const ct = profile.coaching_type?.toLowerCase();
+  const ct = (profile.coaching_type ?? profile.coaching_mode ?? "")?.toLowerCase();
   if (ct === "offline") return "offline";
   if (ct === "hybrid") return "hybrid";
   if (ct === "self_study") return "self_study";
@@ -412,10 +438,12 @@ export function computeTimeAllocation(
 }
 
 /**
- * Guaranteed lecture tasks: at least 2/day from the user's ongoing chapters
- * (up to 2 lectures per chapter) plus any backlog lectures (missed lectures
- * to catch up on). Budget = the lecture reserve reserved before the category
- * allocation, so practice/backlog budgets can never starve lectures.
+ * Guaranteed lecture block for online coaching: at least 2 lectures from the
+ * current chapter (plus extras when backlog exists), then backlog lectures by
+ * deadline, then other ongoing chapters, then a generic 2/day top-up and
+ * fallback lectures when no chapters exist. Budget = the lecture reserve
+ * reserved before the category allocation, so practice/backlog budgets can
+ * never starve lectures.
  */
 function buildGuaranteedLectures(
   activeChapters: ActiveChapter[],
@@ -425,32 +453,51 @@ function buildGuaranteedLectures(
   chapterRank: { subject: string; chapter: string; score: number }[],
   recovery: RecoveryItem[],
   examTomorrow: boolean,
+  fallbackSubject: string,
 ): PlannedTask[] {
   const tasks: PlannedTask[] = [];
   let used = 0;
   const canFit = (min: number) => used + min <= budget + TOLERANCE_MIN;
 
-  // 1. Ongoing chapters (started/in_progress) — up to 2 lectures each.
-  for (const oc of activeChapters.filter((ac) => ac.inClassNow)) {
-    if (!canFit(lecMin)) break;
-    const perChapter = Math.min(2, oc.uc.lectures_remaining ?? 0);
+  const pushChapterLecture = (oc: ActiveChapter, reason: string): boolean => {
+    if (!canFit(lecMin)) return false;
+    const tracked = (oc.uc.lectures_remaining ?? 0) > 0 && !!oc.uc.id;
+    const ps = computeTaskPriority("lecture", oc.subject, oc.chapter, chapterRank, recovery, examTomorrow);
+    tasks.push({
+      title: `Lecture: ${oc.subject} — ${oc.chapter}`,
+      subject: oc.subject, type: "lecture", estimated_minutes: lecMin,
+      priority: "high", chapter: oc.chapter, source: "new_work",
+      priority_score: ps + 0.5,
+      tracker_ref: tracked
+        ? { user_chapter_id: oc.uc.id, field: "lectures_remaining", decrement: 1, progress_flag: "lectureCompleted" }
+        : null,
+      reason,
+    });
+    used += lecMin;
+    oc.uc.lectures_remaining = Math.max(0, (oc.uc.lectures_remaining ?? 0) - 1);
+    return true;
+  };
+
+  // 1. Current chapter (top ongoing) — at least 2 lectures, plus extra lectures
+  //    when backlog exists so the current chapter finishes before anything else.
+  let chapterLectures = 0;
+  const ongoing = activeChapters.filter((ac) => ac.inClassNow);
+  const current = ongoing[0] ?? null;
+  if (current) {
+    const backlogExtra = Math.min(MAX_CURRENT_LECTURE_EXTRA, Math.ceil((pool.pendingLectures ?? 0) / 2));
+    const perChapter = Math.min(2 + backlogExtra, current.uc.lectures_remaining ?? 0);
     for (let i = 0; i < perChapter; i++) {
-      if (!canFit(lecMin)) break;
-      const ps = computeTaskPriority("lecture", oc.subject, oc.chapter, chapterRank, recovery, examTomorrow);
-      tasks.push({
-        title: `Lecture: ${oc.subject} — ${oc.chapter}`,
-        subject: oc.subject, type: "lecture", estimated_minutes: lecMin,
-        priority: "high", chapter: oc.chapter, source: "new_work",
-        priority_score: ps + 0.5,
-        tracker_ref: { user_chapter_id: oc.uc.id, field: "lectures_remaining", decrement: 1, progress_flag: "lectureCompleted" },
-        reason: "Today's lecture for your current chapter — staying in sync with class.",
-      });
-      used += lecMin;
-      oc.uc.lectures_remaining = Math.max(0, (oc.uc.lectures_remaining ?? 0) - 1);
+      const reason = i < 2
+        ? "Today's lecture for your current chapter — staying in sync with class."
+        : "Extra lecture for your current chapter — finishing it clears room for backlog.";
+      if (!pushChapterLecture(current, reason)) break;
+      chapterLectures++;
     }
   }
 
-  // 2. Backlog lectures (missed lectures) — nearest deadline first.
+  // 2. Backlog lectures (missed lectures) — nearest deadline first. These are
+  //    scheduled before new lectures from other chapters because clearing the
+  //    backlog keeps the user in sync with class.
   const backlogLectures = [...pool.lectures].sort((a, b) => (daysUntil(a.due_date) ?? 999) - (daysUntil(b.due_date) ?? 999));
   for (const b of backlogLectures) {
     if (!canFit(lecMin)) break;
@@ -465,6 +512,44 @@ function buildGuaranteedLectures(
     });
     used += lecMin;
     b.pending_lectures = Math.max(0, (b.pending_lectures ?? 0) - 1);
+  }
+
+  // 3. Other ongoing chapters — up to 2 lectures each.
+  for (const oc of ongoing) {
+    if (oc === current) continue;
+    const perChapter = Math.min(2, oc.uc.lectures_remaining ?? 0);
+    for (let i = 0; i < perChapter; i++) {
+      if (!pushChapterLecture(oc, "Today's lecture for your current chapter — staying in sync with class.")) break;
+      chapterLectures++;
+    }
+  }
+
+  // 4. Guarantee — at least 2 lectures/day. Top up from the next best active
+  //    chapters (already ranked by priority) when ongoing work can't fill it.
+  if (chapterLectures < 2) {
+    for (const oc of activeChapters.filter((ac) => !ac.inClassNow)) {
+      if (chapterLectures >= 2) break;
+      const perChapter = Math.min(2 - chapterLectures, Math.max(1, oc.uc.lectures_remaining ?? 0));
+      for (let i = 0; i < perChapter; i++) {
+        if (!pushChapterLecture(oc, "Guaranteed lecture — daily lectures keep momentum and progress.")) break;
+        chapterLectures++;
+      }
+    }
+  }
+
+  // 5. Generic lectures — no chapters available, still honor the 2/day minimum.
+  for (let i = chapterLectures; i < 2; i++) {
+    if (!canFit(lecMin)) break;
+    tasks.push({
+      title: `Lecture: ${fallbackSubject}`,
+      subject: fallbackSubject, type: "lecture", estimated_minutes: lecMin,
+      priority: "high", chapter: null, source: "new_work",
+      priority_score: 8.0,
+      tracker_ref: null,
+      reason: "Guaranteed lecture — daily lectures keep momentum and progress.",
+    });
+    used += lecMin;
+    chapterLectures++;
   }
 
   return tasks;
@@ -904,18 +989,36 @@ export async function generateCoachingPlan(input: CoachingPlannerInput): Promise
   const chapterRank = rankChapters(userChapters, backlog, recovery, profile);
   const revisionCandidates: RevisionCandidate[] = getRevisionCandidates(userChapters, stats, 8);
 
-  // ===== LECTURE GUARANTEE (minimum 2/day) =====
+  // ===== LECTURE GUARANTEE (min 2/day from the current chapter) =====
   // Lecture slots are reserved BEFORE the category allocation, so practice and
-  // backlog budgets can never starve lectures. Target = 2 for ongoing chapters
-  // + 1 per backlog lecture (missed lectures), capped by what fits the day.
-  const isLectureMode = (coachingType === "online" || coachingType === "self_study") && profile.class_mode !== "recorded";
-  const ongoingLectures = activeChapters.filter((ac) => ac.inClassNow && (ac.uc.lectures_remaining ?? 0) > 0).length;
-  const maxLectureSlots = Math.floor(schedulableMinutes / lecMin);
-  const lectureTarget = isLectureMode && (ongoingLectures > 0 || pool.lectures.length > 0) && maxLectureSlots > 0
-    ? Math.min(2 + pool.lectures.length, maxLectureSlots)
+  // backlog budgets can never starve lectures. Target = at least 2 lectures/day
+  // from the current chapter + extra lectures scaled to backlog size (1 extra
+  // per ~2 pending backlog lectures, capped), so users with more backlog get
+  // more lecture time to finish the current chapter and clear the backlog.
+  // When the day can't fit two full-length lectures, the lecture duration is
+  // shrunk (floor 30 min) so the 2-lecture minimum holds on every day with at
+  // least 1 hour of study time.
+  const isLectureMode = (coachingType === "online" || coachingType === "hybrid" || coachingType === "self_study") && profile.class_mode !== "recorded";
+  const MIN_LECTURE_MIN = 30;
+  const weeklyTest = buildWeeklyTest(profile, date);
+  const weeklyTestMinutes = weeklyTest?.estimated_minutes ?? 0;
+  const lectureBudgetRaw = schedulableMinutes - weeklyTestMinutes;
+  const lectureBudget = lectureBudgetRaw >= 2 * MIN_LECTURE_MIN ? lectureBudgetRaw : schedulableMinutes;
+  const lectureMin = isLectureMode && lectureBudget >= 2 * MIN_LECTURE_MIN
+    ? Math.min(lecMin, Math.max(MIN_LECTURE_MIN, Math.floor(lectureBudget / 2)))
+    : lecMin;
+  const maxLectureSlots = Math.floor(schedulableMinutes / lectureMin);
+  const backlogLectureExtra = Math.min(MAX_CURRENT_LECTURE_EXTRA, Math.ceil((pool.pendingLectures ?? 0) / 2));
+  const lectureTarget = isLectureMode && maxLectureSlots > 0
+    ? Math.max(2, Math.min(2 + backlogLectureExtra, maxLectureSlots))
     : 0;
-  const lectureReserve = lectureTarget * lecMin;
-  if (lectureTarget > 0) warnings.push(`Lecture guarantee active — ${lectureTarget} lecture${lectureTarget > 1 ? "s" : ""} scheduled today.`);
+  const lectureReserve = lectureTarget * lectureMin;
+  if (lectureTarget > 0) {
+    const shortened = lectureMin < lecMin ? ` (shortened to ${lectureMin} min to fit the day)` : "";
+    warnings.push(`Lecture guarantee active — ${lectureTarget} lecture${lectureTarget > 1 ? "s" : ""} scheduled today${shortened}.`);
+  } else if (isLectureMode) {
+    warnings.push(`Only ${schedulableMinutes} min of study time today — too little to fit the 2-lecture minimum.`);
+  }
 
   // Compute time allocation per category (on the time left after lectures)
   const allocation = computeTimeAllocation(coachingType, Math.max(60, schedulableMinutes - lectureReserve), hasBacklog, {
@@ -935,28 +1038,29 @@ export async function generateCoachingPlan(input: CoachingPlannerInput): Promise
   }
 
   // ===== Recorded lectures (recorded-class students) =====
-  for (const t of buildRecordedLectures(profile, activeChapters)) {
+  for (const t of buildRecordedLectures(profile, activeChapters, schedulableMinutes)) {
     if (scheduled + t.estimated_minutes > schedulableMinutes + TOLERANCE_MIN) break;
     place(t);
   }
 
-  // ===== Weekly mock test (v3: tests_per_week cadence) =====
-  const weeklyTest = buildWeeklyTest(profile, date);
-  if (weeklyTest && scheduled + weeklyTest.estimated_minutes <= schedulableMinutes + TOLERANCE_MIN) {
-    place(weeklyTest);
-    warnings.push("Weekly test scheduled — treat it like the real exam.");
-  }
-
   // ===== GUARANTEED LECTURES (min 2/day + backlog catch-up) =====
+  // Placed before the weekly mock so the mock can never push out lecture #2.
   if (lectureReserve > 0) {
     const lectureTasks = buildGuaranteedLectures(
-      activeChapters, pool, lectureReserve, lecMin,
+      activeChapters, pool, lectureReserve, lectureMin,
       chapterRank, recovery, examTomorrow,
+      subjectNames[0] ?? "General Studies",
     );
     for (const t of lectureTasks) {
       if (scheduled + t.estimated_minutes > schedulableMinutes + TOLERANCE_MIN) break;
       place(t);
     }
+  }
+
+  // ===== Weekly mock test (v3: tests_per_week cadence) =====
+  if (weeklyTest && scheduled + weeklyTest.estimated_minutes <= schedulableMinutes + TOLERANCE_MIN) {
+    place(weeklyTest);
+    warnings.push("Weekly test scheduled — treat it like the real exam.");
   }
 
   // ===== NEW WORK (online only) =====
