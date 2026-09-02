@@ -14,17 +14,14 @@ export function PublicNavbar() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-[#050507]/70 backdrop-blur-xl border-b border-white/[0.06]">
-      <div className="max-w-7xl mx-auto px-6 h-[64px] flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-black">
-            <Shield className="h-4 w-4" />
-          </span>
-          <span className="text-[15px] font-[650] tracking-tight text-white">StudyShield</span>
-          <span className="hidden rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold tracking-wide text-black sm:inline-flex">JEE • NEET</span>
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-[#050505]/80 backdrop-blur-md border-b border-white/10">
+      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-2">
+          <Shield className="w-8 h-8 text-blue-500" />
+          <span className="text-xl font-bold tracking-tight text-white">StudyShield</span>
         </Link>
 
-        <div className="hidden md:flex items-center gap-7 text-[13px] font-medium text-zinc-400">
+        <div className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-300">
           {NAV_ITEMS.map((item) => (
             <Link key={item.to} to={item.to} className="hover:text-white transition-colors">
               {item.label}
@@ -32,11 +29,11 @@ export function PublicNavbar() {
           ))}
         </div>
 
-        <div className="hidden md:flex items-center gap-3">
-          <Link to="/login" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+        <div className="hidden md:flex items-center gap-4">
+          <Link to="/login" className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
             Login
           </Link>
-          <Link to="/signup" className="inline-flex items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black hover:bg-zinc-100 transition-colors">
+          <Link to="/signup" className="px-5 py-2.5 rounded-full bg-white text-black text-sm font-semibold hover:bg-gray-200 transition-colors">
             Get Started
           </Link>
         </div>
@@ -72,43 +69,38 @@ export function PublicNavbar() {
 
 export function PublicFooter() {
   return (
-    <footer className="border-t border-white/5 bg-[#050507] pt-14 pb-8">
-      <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
+    <footer className="border-t border-white/10 bg-[#020202] pt-16 pb-8">
+      <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
         <div className="col-span-2">
-          <Link to="/" className="flex items-center gap-2.5 mb-3">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-black">
-              <Shield className="h-4 w-4" />
-            </span>
-            <span className="text-[15px] font-[650] tracking-tight text-white">StudyShield</span>
+          <Link to="/" className="flex items-center gap-2 mb-4">
+            <Shield className="w-6 h-6 text-blue-500" />
+            <span className="text-xl font-bold tracking-tight text-white">StudyShield</span>
           </Link>
-          <p className="max-w-sm text-sm leading-relaxed text-zinc-500">
-            The study OS for JEE & NEET — plan, backlog, revision, and focus in one place. Built by toppers, for toppers.
+          <p className="text-gray-500 max-w-sm">
+            The ultimate AI-powered operating system for competitive exam aspirants.
           </p>
         </div>
         <div>
-          <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">Product</h4>
-          <ul className="space-y-2 text-sm text-zinc-500">
-            <li><Link to="/#features" className="hover:text-white transition-colors">Features</Link></li>
-            <li><Link to="/#showcase" className="hover:text-white transition-colors">AI Planner</Link></li>
-            <li><Link to="/#mentor" className="hover:text-white transition-colors">AI Mentor</Link></li>
-            <li><Link to="/#faq" className="hover:text-white transition-colors">FAQ</Link></li>
+          <h4 className="font-semibold mb-4 text-white">Quick Links</h4>
+          <ul className="space-y-2 text-sm text-gray-500">
+            <li><Link to="/#features" className="hover:text-blue-400 transition-colors">Features</Link></li>
+            <li><Link to="/#faq" className="hover:text-blue-400 transition-colors">FAQ</Link></li>
+            <li><Link to="/login" className="hover:text-blue-400 transition-colors">Login</Link></li>
+            <li><Link to="/signup" className="hover:text-blue-400 transition-colors">Sign Up</Link></li>
           </ul>
         </div>
         <div>
-          <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">Company</h4>
-          <ul className="space-y-2 text-sm text-zinc-500">
-            <li><Link to="/about" className="hover:text-white transition-colors">About</Link></li>
-            <li><Link to="/contact" className="hover:text-white transition-colors">Contact</Link></li>
-            <li><Link to="/privacy" className="hover:text-white transition-colors">Privacy</Link></li>
-            <li><Link to="/terms" className="hover:text-white transition-colors">Terms</Link></li>
+          <h4 className="font-semibold mb-4 text-white">Company</h4>
+          <ul className="space-y-2 text-sm text-gray-500">
+            <li><Link to="/about" className="hover:text-blue-400 transition-colors">About</Link></li>
+            <li><Link to="/contact" className="hover:text-blue-400 transition-colors">Contact</Link></li>
+            <li><Link to="/privacy" className="hover:text-blue-400 transition-colors">Privacy Policy</Link></li>
+            <li><Link to="/terms" className="hover:text-blue-400 transition-colors">Terms of Service</Link></li>
           </ul>
         </div>
       </div>
-      <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 border-t border-white/5 px-6 pt-6 text-xs text-zinc-600 sm:flex-row">
-        <span>© {new Date().getFullYear()} StudyShield. Built for learners, not shareholders.</span>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-zinc-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> All systems operational
-        </span>
+      <div className="max-w-7xl mx-auto px-6 pt-8 border-t border-white/5 text-center text-sm text-gray-600">
+        © {new Date().getFullYear()} StudyShield. All rights reserved.
       </div>
     </footer>
   );
