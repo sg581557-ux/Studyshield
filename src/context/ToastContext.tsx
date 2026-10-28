@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 
@@ -26,16 +26,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     if (trimmed && trimmed !== "{}" && trimmed !== "[object Object]") return message;
     return "Something went wrong. Please try again.";
   }
-  function push(type: ToastType, message: string) {
+  const push = useCallback((type: ToastType, message: string) => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     setToasts((p) => [...p, { id, type, message: toSafeMessage(message) }]);
     window.setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 5000);
-  }
-  const toast = {
+  }, []);
+  const toast = useMemo(() => ({
     success: (m: string) => push("success", m),
     error: (m: string) => push("error", m),
     info: (m: string) => push("info", m),
-  };
+  }), [push]);
   const icons = {
     success: <CheckCircle2 className="w-5 h-5 text-success-400" />,
     error: <AlertCircle className="w-5 h-5 text-danger-400" />,

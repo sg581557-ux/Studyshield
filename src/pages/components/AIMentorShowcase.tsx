@@ -3,7 +3,7 @@ import {
   Brain, Sparkles, Bot, Languages, TrendingUp, CheckCircle2,
 } from "lucide-react";
 
-// Static chat mockup for the landing page "AI Mentor" showcase.
+// Static chat mockup for the landing page "Echo" showcase.
 export default function AIMentorShowcase() {
   return (
     <section id="mentor" className="py-32 px-6 max-w-7xl mx-auto">
@@ -19,7 +19,7 @@ export default function AIMentorShowcase() {
             <Brain className="w-6 h-6" />
           </div>
           <h2 className="text-3xl md:text-5xl font-bold leading-tight">
-            Your personal <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600">AI Mentor</span>
+            Your personal <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600">Echo</span>
           </h2>
           <p className="text-lg text-gray-400 leading-relaxed max-w-lg">
             A mentor that knows your syllabus, your backlog and your schedule. Ask anything in

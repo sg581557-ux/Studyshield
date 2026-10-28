@@ -149,10 +149,10 @@ export const COACHING_NAME_OPTIONS: OnboardingOption[] = [
   { value: "other", label: "Other" },
 ];
 
-// Step "How are your classes conducted?"
+// Step "How do you prefer to take classes?" — Online (live) vs Recorded.
 export const CLASS_MODE_OPTIONS: OnboardingOption[] = [
-  { value: "live", label: "Live Classes" },
-  { value: "recorded", label: "Recorded Classes" },
+  { value: "live", label: "Online (Live)" },
+  { value: "recorded", label: "Recorded" },
 ];
 
 // Preferred time for recorded lectures / study (self-study users too).
@@ -174,7 +174,7 @@ export const LECTURE_DURATION_OPTIONS: OnboardingOption[] = [
   { value: "150", label: "2.5 hours" },
 ];
 
-export const ONBOARDING_STEP_COUNT = 18;
+export const ONBOARDING_STEP_COUNT = 17;
 
 // Subjects offered per target exam (spec: JEE → PCM, NEET → PCB + Zoology,
 // others based on exam).
@@ -359,6 +359,38 @@ export function primaryExamFromGoals(goals: string[], otherText: string): string
   if (goals.includes("olympiad")) return "Other";
   if (goals.includes("other") && otherText.trim()) return "Other";
   return "";
+}
+
+/** Returns the deduplicated union of stream + every competitive goal's subjects + class fallback. */
+export function subjectsForGoals(
+  stream: string,
+  goals: string[],
+  otherText: string,
+  fallbackExamLabel: string,
+): string[] {
+  const set = new Set<string>();
+  // stream subjects first (preserve stream order)
+  for (const s of streamSubjects(stream)) set.add(s);
+  // every selected competitive goal contributes its exam subjects
+  for (const g of goals) {
+    const label = GOAL_TO_EXAM_LABEL[g];
+    if (label && SUBJECTS_BY_EXAM[label]) {
+      for (const s of SUBJECTS_BY_EXAM[label]!) set.add(s);
+    }
+    if (g === "olympiad") {
+      for (const s of SUBJECTS_BY_EXAM.Other) set.add(s);
+    }
+  }
+  // primary derived exam as final fallback (covers "other" free-text and v2 drafts)
+  const primary = primaryExamFromGoals(goals, otherText) || fallbackExamLabel;
+  if (primary && SUBJECTS_BY_EXAM[primary]) {
+    for (const s of SUBJECTS_BY_EXAM[primary]!) set.add(s);
+  }
+  // if still empty (no stream, no goal), show generic Other pool
+  if (set.size === 0) {
+    for (const s of SUBJECTS_BY_EXAM.Other) set.add(s);
+  }
+  return [...set];
 }
 
 export const SLEEP_GOAL_OPTIONS: OnboardingOption[] = [

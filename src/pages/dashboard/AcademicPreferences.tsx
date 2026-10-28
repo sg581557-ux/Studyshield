@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   GraduationCap, School, Video, Timer, BookOpen, ListChecks, Sparkles,
   ClipboardList, Bell, Palette, Search, Save, ChevronDown, Plus, Trash2,
@@ -8,14 +8,17 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { useTheme, ACCENTS, type Theme } from "../../context/ThemeContext";
 import { db } from "../../services/db";
+import { CrazyGridSkeleton, CrazyInlineLoader } from "../../components/loaders/AestheticLoader";
 import { Button, Card } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import {
   STREAMS, SCHOOL_CLASSES, SCHOOL_BOARDS, TARGET_EXAMS, HOW_STUDY_OPTIONS,
-  COACHING_NAME_OPTIONS, CLASS_MODE_OPTIONS, LECTURE_DURATION_OPTIONS,
+  COACHING_NAME_OPTIONS, CLASS_MODE_OPTIONS,
   PRODUCTIVE_SLOTS, SLEEP_GOAL_OPTIONS, TESTS_PER_WEEK_OPTIONS,
   SESSION_LENGTHS, BREAK_OPTIONS, PREFERRED_LANGUAGES, chaptersForSubject,
+  streamSubjects,
 } from "../../lib/onboarding";
+import { subjectsForExam as backlogSubjectsForExam, chaptersFor as backlogChaptersFor } from "../../lib/backlogMeta";
 import {
   WEEKDAYS, WEEKDAY_LABELS, YEARS, PLANNER_STYLES, TIME_FORMATS, DATE_FORMATS,
   MOCK_DURATIONS, DEFAULT_PRIORITY_WEIGHTS, DEFAULT_NOTIFICATION_PREFS,
@@ -46,7 +49,7 @@ const SECTIONS: SectionDef[] = [
   { id: "school", icon: School, title: "School Schedule", desc: "School days, timings and holidays.", keywords: "school days start end holidays timetable" },
   { id: "coaching", icon: Video, title: "Coaching", desc: "Mode, coaching name, live/recorded classes.", keywords: "coaching online offline hybrid live recorded lecture duration" },
   { id: "study", icon: Timer, title: "Study Preferences", desc: "Daily hours, productive time, sleep, breaks.", keywords: "study hours productive night owl sleep wake break session revision" },
-  { id: "chapters", icon: BookOpen, title: "Subjects & Chapters", desc: "Add, edit, complete or reset chapter progress.", keywords: "subjects chapters progress lecture module dpp pyq revision confidence" },
+  { id: "chapters", icon: BookOpen, title: "Chapter Tracker", desc: "Add, edit, complete or reset chapter progress.", keywords: "subjects chapters progress lecture module dpp pyq revision confidence chapter tracker" },
   { id: "backlog", icon: ListChecks, title: "Backlog Preferences", desc: "Priority, difficulty and pending work per backlog item.", keywords: "backlog priority difficulty lectures questions revision tests" },
   { id: "planner", icon: Sparkles, title: "AI Planner Preferences", desc: "Planner style, daily caps, ratios and priority weights.", keywords: "planner ai style hours max min revision practice ratio weights rest day" },
   { id: "mocks", icon: ClipboardList, title: "Mock Test Preferences", desc: "Weekly tests, duration, test day and analysis.", keywords: "mock test weekly duration day analysis" },
@@ -72,15 +75,15 @@ function draftFromProfile(p: Profile | null) {
     target_exam: p?.target_exam ?? "",
     target_year: p?.target_year ?? p?.exam_year ?? "",
     school_days: p?.school_days ?? [],
-    school_start: p?.school_start ?? "",
-    school_end: p?.school_end ?? "",
+    school_start: "07:00",
+    school_end: "14:00",
     school_holidays: p?.school_holidays ?? [],
     coaching_mode: p?.coaching_mode ?? "",
     coaching_name: p?.coaching_name ?? "",
     class_mode: p?.class_mode ?? "live",
     class_schedule: (p?.class_schedule ?? []) as ClassScheduleEntry[],
     lectures_per_day: p?.lectures_per_day ?? 1,
-    lecture_duration: p?.lecture_duration ?? p?.lecture_duration_min ?? 60,
+    lecture_duration: 120,
     daily_goal_hours: p?.daily_goal_hours ?? 6,
     productive_time: p?.productive_time ?? "",
     night_owl_mode: p?.night_owl_mode ?? false,
@@ -196,14 +199,15 @@ export default function AcademicPreferences() {
   const [loadingRows, setLoadingRows] = useState(true);
   const [rowSaving, setRowSaving] = useState<string | null>(null);
 
-  // Reset the draft when the profile identity changes (e.g. a fresh login
-  // or account switch). Render-phase adjustment so the reset commits with
-  // the profile swap; the initial draft is seeded in the useState initializer.
-  const [prevProfileId, setPrevProfileId] = useState<string | undefined>(profile?.id);
-  if (prevProfileId !== profile?.id) {
-    setPrevProfileId(profile?.id);
-    setDraft(draftFromProfile(profile));
-  }
+  // Reset the draft when the profile identity changes. Use effect to avoid
+  // render-phase setState which causes StrictMode double commits (3-4x refresh).
+  const prevProfileIdRef = useRef<string | undefined>(profile?.id);
+  useEffect(() => {
+    if (prevProfileIdRef.current !== profile?.id) {
+      prevProfileIdRef.current = profile?.id;
+      setDraft(draftFromProfile(profile));
+    }
+  }, [profile?.id, profile]);
 
   useEffect(() => {
     (async () => {
@@ -246,15 +250,41 @@ export default function AcademicPreferences() {
   const isSectionOpen = (def: SectionDef) => (q ? [def.title, def.desc, def.keywords].some((s) => s.toLowerCase().includes(q)) : open[def.id]);
   const toggleSection = (id: string) => setOpen((o) => ({ ...o, [id]: !o[id] }));
 
-  const subjects = useMemo(() => {
-    const list = new Set<string>([...(profile?.subjects ?? []), ...chapters.map((c) => c.subject)]);
-    return [...list].sort((a, b) => a.localeCompare(b));
-  }, [profile?.subjects, chapters]);
-
-  const chapterCatalog = useMemo(
-    () => chaptersForSubject("Physics", profile?.school_class ?? "12", profile?.stream ?? "other").slice(0, 40),
-    [profile?.school_class, profile?.stream],
+  // All subjects available for the current stream + target exam + existing data so the
+  // "Add a chapter" dropdown never shows PCM-only for commerce/arts/UPSC/etc.
+  const availableStreamSubjects = useMemo(
+    () => (profile?.stream ? streamSubjects(profile.stream) : []),
+    [profile?.stream],
   );
+  const availableExamSubjects = useMemo(
+    () => (profile?.target_exam ? backlogSubjectsForExam(profile.target_exam) : []),
+    [profile?.target_exam],
+  );
+  const allAvailableSubjects = useMemo(
+    () => [...new Set([...availableStreamSubjects, ...availableExamSubjects])],
+    [availableStreamSubjects, availableExamSubjects],
+  );
+
+  const subjects = useMemo(() => {
+    const list = new Set<string>([
+      ...(profile?.subjects ?? []),
+      ...chapters.map((c) => c.subject),
+      ...allAvailableSubjects,
+    ]);
+    // Fallback to generic Other pool when nothing is available yet
+    if (list.size === 0) {
+      for (const s of backlogSubjectsForExam("other")) list.add(s);
+    }
+    return [...list].sort((a, b) => a.localeCompare(b));
+  }, [profile?.subjects, chapters, allAvailableSubjects]);
+
+  const chapterCatalog = useMemo(() => {
+    const first = allAvailableSubjects[0] ?? subjects[0] ?? "Physics";
+    // Prefer exam-aware syllabus; fallback to class/stream catalog
+    const fromExam = backlogChaptersFor(profile?.target_exam ?? "other", first);
+    if (fromExam.length > 0) return fromExam.slice(0, 40);
+    return chaptersForSubject(first, profile?.school_class ?? "12", profile?.stream ?? "other").slice(0, 40);
+  }, [allAvailableSubjects, subjects, profile?.target_exam, profile?.school_class, profile?.stream]);
 
   const weightSum =
     (draft.priority_weights.backlog ?? 0) + (draft.priority_weights.lecture ?? 0) +
@@ -321,10 +351,12 @@ export default function AcademicPreferences() {
   // ---- New chapter form ----------------------------------------------------
   const [newSubject, setNewSubject] = useState("");
   const [newChapter, setNewChapter] = useState("");
-  const newCatalog = useMemo(
-    () => (newSubject ? chaptersForSubject(newSubject, profile?.school_class ?? "12", profile?.stream ?? "other") : chapterCatalog),
-    [newSubject, profile?.school_class, profile?.stream, chapterCatalog],
-  );
+  const newCatalog = useMemo(() => {
+    if (!newSubject) return chapterCatalog;
+    const fromExam = backlogChaptersFor(profile?.target_exam ?? "other", newSubject);
+    if (fromExam.length > 0) return fromExam;
+    return chaptersForSubject(newSubject, profile?.school_class ?? "12", profile?.stream ?? "other");
+  }, [newSubject, profile?.target_exam, profile?.school_class, profile?.stream, chapterCatalog]);
 
   async function handleAddChapter() {
     if (!profile) return;
@@ -380,8 +412,9 @@ export default function AcademicPreferences() {
 
   if (loadingRows && chapters.length === 0 && backlogItems.length === 0) {
     return (
-      <div className="flex items-center justify-center py-24 text-slate-500">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading your data…
+      <div className="space-y-4 py-4">
+        <CrazyInlineLoader message="Loading your academic data…" />
+        <CrazyGridSkeleton count={8} />
       </div>
     );
   }
@@ -393,7 +426,7 @@ export default function AcademicPreferences() {
           <GraduationCap className="w-6 h-6 text-accent-400" /> Academic Preferences
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Edit every onboarding answer — changes flow instantly to the AI Planner, AI Mentor, Backlog and Dashboard.
+          Edit every onboarding answer — changes flow instantly to the AI Planner, Echo, Backlog and Dashboard.
         </p>
       </div>
 
@@ -465,17 +498,9 @@ export default function AcademicPreferences() {
 
       {/* ============ 2. School Schedule ============ */}
       <Section def={SECTIONS[1]} open={isSectionOpen(SECTIONS[1])} onToggle={() => toggleSection("school")} search={search}>
-        <Field label="School days">
+        <Field label="School days" hint="The AI Planner assumes 7:00 AM – 2:00 PM for any selected school day.">
           <MultiChip options={WEEKDAYS} value={draft.school_days} onChange={(v) => set("school_days", v)} />
         </Field>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="School start time">
-            <input type="time" className="input-base" value={draft.school_start} onChange={(e) => set("school_start", normalizeTime(e.target.value))} />
-          </Field>
-          <Field label="School end time">
-            <input type="time" className="input-base" value={draft.school_end} onChange={(e) => set("school_end", normalizeTime(e.target.value))} />
-          </Field>
-        </div>
         <Field label="School holidays" hint="Days school is closed — the planner treats them like weekends.">
           <MultiChip options={WEEKDAYS} value={draft.school_holidays} onChange={(v) => set("school_holidays", v)} />
         </Field>
@@ -484,9 +509,7 @@ export default function AcademicPreferences() {
             loading={saving === "School schedule"}
             onClick={() =>
               saveSection("School schedule", () => {
-                const s = normalizeTime(draft.school_start), e = normalizeTime(draft.school_end);
-                if (s && e && s >= e) { toast.error("School end time must be after the start time."); return null; }
-                return { school_days: draft.school_days, school_start: s || null, school_end: e || null, school_holidays: draft.school_holidays, attends_school: draft.school_days.length > 0 };
+                return { school_days: draft.school_days, school_start: "07:00", school_end: "14:00", school_holidays: draft.school_holidays, attends_school: draft.school_days.length > 0 };
               })
             }
           >
@@ -521,19 +544,13 @@ export default function AcademicPreferences() {
               {CLASS_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
-          <Field label="Recorded lectures per day" hint="How many recorded lectures you watch per day.">
+          <Field label="Recorded lectures per day" hint="How many recorded lectures you watch per day (each assumed 2 hours).">
             <input type="number" min="0" max="8" className="input-base" value={draft.lectures_per_day}
               onChange={(e) => set("lectures_per_day", clampNumInRange(Number(e.target.value || 0), 0, 8))} />
           </Field>
-          <Field label="Average lecture duration">
-            <select className="select-base" value={String(draft.lecture_duration)}
-              onChange={(e) => set("lecture_duration", Number(e.target.value))}>
-              {LECTURE_DURATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </Field>
         </div>
 
-        {draft.class_mode === "live" && (
+        {(draft.class_mode === "live" || draft.class_mode === "online") && (
           <div>
             <span className="input-label">Live class timings — toggle each day and set the time block</span>
             <div className="space-y-1.5">
@@ -579,12 +596,12 @@ export default function AcademicPreferences() {
               saveSection("Coaching", () => ({
                 coaching_mode: draft.coaching_mode || null,
                 coaching_name: draft.coaching_name || null,
-                coaching_is_live: draft.class_mode === "live",
+                coaching_is_live: draft.class_mode === "live" || draft.class_mode === "online",
                 class_mode: draft.class_mode,
                 class_schedule: draft.class_schedule.filter((e) => normalizeTime(e.start) && normalizeTime(e.end)).map((e) => ({ ...e, start: normalizeTime(e.start), end: normalizeTime(e.end) })),
                 lectures_per_day: draft.lectures_per_day,
-                lecture_duration: draft.lecture_duration,
-                lecture_duration_min: draft.lecture_duration,
+                lecture_duration: 120,
+                lecture_duration_min: 120,
                 coaching_enabled: !!draft.coaching_mode && draft.coaching_mode !== "self_study",
               }))
             }
@@ -615,12 +632,6 @@ export default function AcademicPreferences() {
                 onChange={(v) => set("night_owl_mode", v.includes("on"))}
               />
             </div>
-          </Field>
-          <Field label="Sleep time">
-            <input type="time" className="input-base" value={draft.sleep_time} onChange={(e) => set("sleep_time", normalizeTime(e.target.value))} />
-          </Field>
-          <Field label="Wake-up time">
-            <input type="time" className="input-base" value={draft.wake_up_time} onChange={(e) => set("wake_up_time", normalizeTime(e.target.value))} />
           </Field>
           <Field label="Preferred break duration">
             <select className="select-base" value={String(draft.break_min)} onChange={(e) => set("break_min", Number(e.target.value))}>
@@ -659,8 +670,6 @@ export default function AcademicPreferences() {
                   daily_goal_hours: draft.daily_goal_hours,
                   productive_time: draft.night_owl_mode ? "night_owl" : (draft.productive_time || null),
                   night_owl_mode: draft.night_owl_mode,
-                  sleep_time: normalizeTime(draft.sleep_time) || null,
-                  wake_up_time: normalizeTime(draft.wake_up_time) || null,
                   break_min: draft.break_min,
                   session_length_min: draft.session_length_min,
                   revision_time: normalizeTime(draft.revision_time) || null,
@@ -1013,7 +1022,7 @@ export default function AcademicPreferences() {
 
       <div className="flex items-center justify-center gap-2 text-[11px] text-slate-600 pt-2 pb-6">
         <ArrowLeft className="w-3 h-3" />
-        Changes save instantly to your account — the AI Planner, AI Mentor, Backlog and Dashboard pick them up automatically.
+        Changes save instantly to your account — the AI Planner, Echo, Backlog and Dashboard pick them up automatically.
         {planDays.length > 0 && <> · Rest day: {planDays.map((d) => WEEKDAY_LABELS[d.value]).join(", ")}</>}
       </div>
     </div>
@@ -1044,23 +1053,23 @@ function ChapterRow({
   const [confidence, setConfidence] = useState(uc.confidence ?? 3);
   const [tests, setTests] = useState(Number((uc.progress?.pending_tests ?? 0)));
 
-  // Reset the inline editor when the row's data changes (optimistic saves).
-  // Render-phase adjustment — the editor picks up the new values in the same
-  // commit that delivered them; the initial values come from useState
-  // initializers on mount.
-  const [prevUc, setPrevUc] = useState(uc);
-  if (prevUc !== uc) {
-    setPrevUc(uc);
-    setStatus(uc.status ?? "not_started");
-    setLectures(uc.lectures_remaining ?? 0);
-    setModulePct(Number(uc.progress?.module_pct ?? 0));
-    setDpp(Number(uc.progress?.dpp_pending ?? 0));
-    setPyq(Number(uc.progress?.pyq_pending ?? 0));
-    setRevision(uc.revision_pending ?? 0);
-    setRevisionLevel(Number(uc.progress?.revision_level ?? 0));
-    setConfidence(uc.confidence ?? 3);
-    setTests(Number(uc.progress?.pending_tests ?? 0));
-  }
+  // Reset the inline editor when the row's data changes. Effect avoids
+  // render-phase setState (StrictMode double commit → perceived refresh).
+  const prevUcRef = useRef(uc);
+  useEffect(() => {
+    if (prevUcRef.current !== uc) {
+      prevUcRef.current = uc;
+      setStatus(uc.status ?? "not_started");
+      setLectures(uc.lectures_remaining ?? 0);
+      setModulePct(Number(uc.progress?.module_pct ?? 0));
+      setDpp(Number(uc.progress?.dpp_pending ?? 0));
+      setPyq(Number(uc.progress?.pyq_pending ?? 0));
+      setRevision(uc.revision_pending ?? 0);
+      setRevisionLevel(Number(uc.progress?.revision_level ?? 0));
+      setConfidence(uc.confidence ?? 3);
+      setTests(Number(uc.progress?.pending_tests ?? 0));
+    }
+  }, [uc]);
 
   const done = status === "completed";
   const progressPct = useMemo(() => {

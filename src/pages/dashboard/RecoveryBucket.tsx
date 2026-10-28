@@ -6,6 +6,7 @@ import { db } from "../../services/db";
 import { Card, CardBody, SectionTitle, EmptyState } from "../../components/ui";
 import { minutesToHM, TASK_TYPE_LABELS } from "../../lib/constants";
 import type { RecoveryItem } from "../../lib/types";
+import { CrazyListSkeleton } from "../../components/loaders/AestheticLoader";
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   pending: { label: "Pending", color: "text-warning-400" },
@@ -78,7 +79,7 @@ export default function RecoveryBucket() {
 
       <Card><CardBody>
         <SectionTitle>Recovery items</SectionTitle>
-        {loading ? <p className="text-sm text-slate-500 py-4">Loading…</p> :
+        {loading ? <CrazyListSkeleton count={5} /> :
          items.length === 0 ? <EmptyState icon={<CheckCircle2 className="w-8 h-8" />} title="Nothing in recovery" description={filter === "pending" ? "All caught up! Great work." : "No items match this filter."} /> : (
           <div className="space-y-1.5 mt-2">
             {items.map((item) => {

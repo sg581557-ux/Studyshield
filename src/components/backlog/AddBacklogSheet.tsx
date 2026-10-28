@@ -62,11 +62,16 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">{children}</p>;
 }
 
+function firstSubjectForExam(examId: string): string {
+  const list = subjectsForExam(examId);
+  return list[0] ?? "Physics";
+}
+
 export function AddBacklogSheet({ open, onClose, items, exam: activeExam, preset, editItem, onSaved }: SheetProps) {
   const { toast } = useToast();
   const [mode, setMode] = useState<SheetMode>("add");
   const [exam, setExam] = useState(activeExam);
-  const [subject, setSubject] = useState("Physics");
+  const [subject, setSubject] = useState(() => firstSubjectForExam(activeExam));
   const [chapter, setChapter] = useState("");
   const [kind, setKind] = useState<BacklogKind | null>(null);
   const [resources, setResources] = useState<Partial<Record<BacklogKind, BacklogResourceProgress>>>({});
@@ -100,7 +105,7 @@ export function AddBacklogSheet({ open, onClose, items, exam: activeExam, preset
     setExam(activeExam);
     if (editItem) {
       setMode("edit");
-      setSubject(editItem.subject ?? "Physics");
+      setSubject(editItem.subject ?? firstSubjectForExam(activeExam));
       setChapter(editItem.chapter ?? "");
       const res = extractBacklogResources(editItem);
       const kinds = Object.keys(res).filter((k) => (res[k as BacklogKind]?.total ?? 0) > 0);
@@ -113,7 +118,7 @@ export function AddBacklogSheet({ open, onClose, items, exam: activeExam, preset
       setDueDate(editItem.due_date ?? "");
     } else {
       setMode(preset?.bulk ? "bulk" : "add");
-      setSubject(preset?.subject ?? "Physics");
+      setSubject(preset?.subject ?? firstSubjectForExam(activeExam));
       setChapter("");
       const k = preset?.kind ?? null;
       setKind(k);
@@ -125,6 +130,17 @@ export function AddBacklogSheet({ open, onClose, items, exam: activeExam, preset
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
+
+  // If the exam changes and the current subject is not in the new exam's list,
+  // snap to the first available subject so a chip is always active.
+  useEffect(() => {
+    const available = subjectsForExam(exam);
+    if (available.length > 0 && !available.includes(subject)) {
+      setSubject(available[0]);
+      setChapter("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exam]);
 
   // Duplicate detection — pure function of the current form inputs
   const dupInputKey = open && mode !== "update"

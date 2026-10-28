@@ -38,10 +38,82 @@ export const SUBJECT_COLORS: Record<string, string> = {
   Chemistry: "#f59e0b",
   Mathematics: "#8b5cf6",
   Biology: "#10b981",
+  Botany: "#10b981",
+  Zoology: "#059669",
   Accounts: "#ef4444",
+  Accounting: "#ef4444",
+  Accountancy: "#ef4444",
   Economics: "#14b8a6",
   Business: "#6366f1",
+  "Business Studies": "#6366f1",
+  "Business Laws": "#6366f1",
+  "Business Economics": "#14b8a6",
   General: "#64748b",
+  // UPSC / State PSC
+  History: "#f97316",
+  Geography: "#0ea5e9",
+  Polity: "#8b5cf6",
+  "Science & Technology": "#06b6d4",
+  Environment: "#22c55e",
+  "Current Affairs": "#eab308",
+  Ethics: "#a78bfa",
+  // Aptitude / Reasoning / English
+  "Quantitative Aptitude": "#8b5cf6",
+  "Quantitative Techniques": "#8b5cf6",
+  "General Intelligence & Reasoning": "#f43f5e",
+  "Reasoning Ability": "#f43f5e",
+  Reasoning: "#f43f5e",
+  "Logical Reasoning": "#f43f5e",
+  "Logical Reasoning & Data Interpretation": "#f43f5e",
+  "English Language": "#38bdf8",
+  English: "#38bdf8",
+  "General Awareness": "#eab308",
+  "General Studies": "#64748b",
+  "General Ability Test": "#64748b",
+  "General Knowledge": "#eab308",
+  "Current Affairs & General Knowledge": "#eab308",
+  "Verbal Ability & Reading Comprehension": "#38bdf8",
+  "Verbal Ability": "#38bdf8",
+  "Verbal Reasoning": "#38bdf8",
+  "Quantitative Reasoning": "#8b5cf6",
+  "Data Interpretation": "#f43f5e",
+  "Data Insights": "#f43f5e",
+  "Analytical Writing": "#38bdf8",
+  // CA / Commerce
+  "Advanced Accounting": "#ef4444",
+  "Corporate Laws": "#6366f1",
+  "Cost & Management Accounting": "#f59e0b",
+  Taxation: "#f97316",
+  "Financial Reporting": "#ef4444",
+  "Strategic Financial Management": "#0ea5e9",
+  "Advanced Auditing": "#a78bfa",
+  "Direct Tax Laws": "#f97316",
+  // NDA / Defence
+  "General Science": "#10b981",
+  // GATE / Engineering
+  "Engineering Mathematics": "#8b5cf6",
+  "General Aptitude": "#eab308",
+  "Core Technical": "#06b6d4",
+  "Core Subjects": "#06b6d4",
+  "Core Discipline — Part I": "#06b6d4",
+  // CUET / School
+  Science: "#10b981",
+  "Social Science": "#f97316",
+  "Social Studies": "#f97316",
+  "History & Civics": "#f97316",
+  "Political Science": "#8b5cf6",
+  Psychology: "#ec4899",
+  Sociology: "#a78bfa",
+  "Applied Science": "#06b6d4",
+  "Engineering Mechanics": "#0ea5e9",
+  "Computer Fundamentals": "#22d3ee",
+  "Computer Awareness": "#22d3ee",
+  "Banking Awareness": "#0ea5e9",
+  "Computer Science": "#22d3ee",
+  // Law
+  "Legal Reasoning": "#6366f1",
+  // Generic fallbacks
+  Mathematics_alt: "#8b5cf6",
 };
 
 export const TASK_TYPE_LABELS: Record<string, string> = {
@@ -128,7 +200,13 @@ export function levelFromXP(xp: number): { level: number; title: string; current
 }
 
 export const uid = (prefix = "id"): string => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-export const todayISODate = (): string => new Date().toISOString().slice(0, 10);
+export const todayISODate = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 
 export function minutesToHM(min: number): string {
   const h = Math.floor(min / 60);

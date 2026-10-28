@@ -6,7 +6,7 @@ import { Menu, Shield, X } from "lucide-react";
 const NAV_ITEMS = [
   { label: "Features", to: "/#features" },
   { label: "AI Planner", to: "/#showcase" },
-  { label: "AI Mentor", to: "/#mentor" },
+  { label: "Echo", to: "/#mentor" },
   { label: "FAQ", to: "/#faq" },
 ];
 

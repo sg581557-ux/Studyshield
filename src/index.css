@@ -248,10 +248,20 @@ html.light [class*="border-white/20"],
 html.light [class*="border-white/[0.2]"] {
   border-color: #e2e8f0; /* slate-200 */
 }
+html.light [class*="bg-white/5"],
 html.light [class*="bg-white/10"],
-html.light [class*="bg-white/15"] {
-  background-color: #e2e8f0; /* slate-200 — inline code, hover chips */
+html.light [class*="bg-white/15"],
+html.light [class*="bg-white/[0.04]"],
+html.light [class*="bg-white/[0.06]"] {
+  background-color: #f8fafc; /* slate-50 — cards / hover chips */
+  border-color: #e2e8f0;
 }
+html.light .text-zinc-100 { color: #0f172a !important; } /* slate-900 */
+html.light .text-zinc-200 { color: #1e293b !important; } /* slate-800 */
+html.light .text-zinc-300 { color: #334155 !important; } /* slate-700 */
+html.light .text-zinc-600 { color: #475569 !important; } /* slate-600 */
+html.light .text-white\/10 { color: #e2e8f0 !important; }
+html.light [class*="text-white/10"] { color: #e2e8f0 !important; }
 
 /* Colored surfaces keep white labels in light mode too. */
 html.light .chat-user,
@@ -430,4 +440,73 @@ html.light .markdown-body th {
   margin-left: 1px;
   color: rgb(var(--accent-400));
   animation: chat-caret-blink 1s step-end infinite;
+}
+
+/* ============================================================
+   Dashboard premium — aurora & shimmer
+   ============================================================ */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes aurora {
+  0%, 100% { opacity: 0.9; transform: translate(0, 0) scale(1); }
+  50% { opacity: 1; transform: translate(10px, -10px) scale(1.04); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.dashboard-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.dashboard-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 2.2s infinite;
+}
+
+/* ============================================================
+   Dashboard — light mode adaptation
+   The bento uses custom #0f0f10 / #070708 surfaces. In light mode
+   flip them to white/slate so text (already flipped via global
+   .text-white → slate-900 etc) stays visible and the bento feels
+   native in both themes. Scoped to [data-keep-dark] (the dashboard
+   shell) so public pages stay dark.
+   ============================================================ */
+html.light [data-keep-dark].bg-\[\#070708\] { background-color: #f8fafc !important; }
+html.light [data-keep-dark] .bg-\[\#070708\] { background-color: #f8fafc !important; }
+html.light [data-keep-dark] .bg-\[\#0f0f10\] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04) !important;
+}
+html.light [data-keep-dark] .bg-\[\#0a0a0c\] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+html.light [data-keep-dark] .bg-\[\#0a0a0c\]\/80 {
+  background-color: rgba(255,255,255,0.9) !important;
+  border-color: #e2e8f0 !important;
+  backdrop-filter: blur(16px);
+}
+/* removed pills rule */
+/* Light: translucent white overlays become slate-50 */
+html.light [data-keep-dark] .bg-white\/5,
+html.light [data-keep-dark] .bg-white\/10,
+html.light [data-keep-dark] .bg-white\/\[0\.04\],
+html.light [data-keep-dark] .bg-white\/\[0\.06\] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+/* Light: ensure card hover stays subtle */
+html.light [data-keep-dark] .hover\:bg-white\/10:hover { background-color: #f1f5f9 !important; }
+html.light [data-keep-dark] .hover\:bg-white\/\[0\.06\]:hover { background-color: #f8fafc !important; }
+/* Light: soft grid / aurora still visible */
+html.light [data-keep-dark] .bg-\[radial-gradient\(ellipse_at_center\,rgba\(56\,177\,255\,0\.10\)\,transparent_60\%\)\] {
+  opacity: 0.6;
 }

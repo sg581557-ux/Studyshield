@@ -87,18 +87,17 @@
         }
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-DJvi56Fc.js"></script>
+    <script type="module" crossorigin src="/assets/index-BOXPJZpC.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-B0Z9INg1.js">
     <link rel="modulepreload" crossorigin href="/assets/createLucideIcon-BN1N4-4u.js">
-    <link rel="modulepreload" crossorigin href="/assets/AnimatePresence-CQ8mijiN.js">
+    <link rel="modulepreload" crossorigin href="/assets/x-BzUb_L2H.js">
     <link rel="modulepreload" crossorigin href="/assets/circle-check-CBBmQinq.js">
-    <link rel="modulepreload" crossorigin href="/assets/x-BLlSMSBl.js">
-    <link rel="modulepreload" crossorigin href="/assets/ToastContext-Ceq8atrq.js">
     <link rel="modulepreload" crossorigin href="/assets/preload-helper-Czpn1I53.js">
-    <link rel="modulepreload" crossorigin href="/assets/db-J1ZbQXW6.js">
+    <link rel="modulepreload" crossorigin href="/assets/supabase-BkPIzxjO.js">
+    <link rel="modulepreload" crossorigin href="/assets/db-D6KOBvAw.js">
     <link rel="modulepreload" crossorigin href="/assets/katex-Csd_EhBb.js">
     <link rel="stylesheet" crossorigin href="/assets/katex-ClQbWekD.css">
-    <link rel="stylesheet" crossorigin href="/assets/index-gbiHt8gb.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-DCjkvaFs.css">
   </head>
   <body class="bg-ink-950">
     <noscript>
@@ -117,6 +116,14 @@
          Previous client-side redirect (workers.dev → studyshield.study) broke the site when the
          custom domain's asset deployment was stale (JS 404). Both hosts are now valid; canonical
          is enforced via <link rel="canonical"> and server-side 301 in Cloudflare dashboard if needed. -->
+    <style>
+      /* Inline critical CSS — ensures dark shell even if /assets/*.css 404s (stale deploy).
+         Without this, browser defaults to white <body> -> "white screen" report. */
+      html, body { background: #0a0a0b; color: #cbd5e1; margin: 0; }
+      #root:empty + #boot-fallback { display: block; }
+      #boot-fallback { display: none; padding: 24px; text-align: center; font-family: Inter, system-ui, sans-serif; }
+      #boot-fallback .card { max-width: 560px; margin: 12vh auto; padding: 24px; background: #18181b; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
+    </style>
     <script>
       // Apply theme before paint to avoid flash of incorrect theme.
       (function () {
@@ -133,7 +140,46 @@
           document.documentElement.classList.add("dark");
         }
       })();
+      // Chunk-load failure detector — hashed assets 404 when custom domain
+      // serves stale index.html (see _headers fix). Without this, failed
+      // modulepreload leaves #root empty -> white screen with no clue.
+      (function () {
+        var timeout = setTimeout(function () {
+          var root = document.getElementById('root');
+          var fb = document.getElementById('boot-fallback');
+          if (root && root.innerHTML.trim() === '' && fb) {
+            fb.style.display = 'block';
+            fb.setAttribute('data-reason', 'timeout');
+          }
+        }, 4000);
+        window.addEventListener('error', function (e) {
+          var msg = (e.message || '') + ' ' + ((e.target && e.target.src) || '');
+          var isChunk = /Loading chunk|Failed to fetch|dynamically imported module|modulepreload|assets\//i.test(msg) ||
+            (e.target && e.target.tagName === 'LINK' && /assets\//.test(e.target.href || '')) ||
+            (e.target && e.target.tagName === 'SCRIPT' && /assets\//.test(e.target.src || ''));
+          if (!isChunk) return;
+          clearTimeout(timeout);
+          var fb = document.getElementById('boot-fallback');
+          if (fb) {
+            fb.style.display = 'block';
+            fb.setAttribute('data-reason', 'chunk-error');
+            var detail = fb.querySelector('[data-detail]');
+            if (detail) detail.textContent = 'A new version was published. Your browser loaded an old page that points to deleted files.';
+          }
+        }, true);
+        window.addEventListener('load', function () { clearTimeout(timeout); });
+      })();
     </script>
     <div id="root"></div>
+    <div id="boot-fallback" role="alert" aria-live="polite">
+      <div class="card">
+        <div style="font-size:28px;margin-bottom:8px">◎</div>
+        <div style="font-weight:700;color:#fff;margin-bottom:6px">Updating StudyShield…</div>
+        <div data-detail style="font-size:14px;line-height:1.5;color:#94a3b8;margin-bottom:16px">The app is loading a new version. If this hangs, hard-refresh to clear the stale page.</div>
+        <button onclick="window.location.reload(true)" style="padding:10px 18px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:#fff;color:#0a0a0b;font-weight:600;cursor:pointer">Reload</button>
+        <button onclick="localStorage.clear();sessionStorage.clear();window.location.reload(true)" style="margin-left:8px;padding:10px 18px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:transparent;color:#e2e8f0;font-weight:600;cursor:pointer">Clear cache &amp; reload</button>
+        <div style="margin-top:12px;font-size:11px;color:#64748b">If this persists, the custom domain is serving a stale deploy — see <code>public/_headers</code> fix.</div>
+      </div>
+    </div>
   </body>
 </html>

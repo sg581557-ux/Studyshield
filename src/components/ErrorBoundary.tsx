@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
+import { forceReleaseAllScrollLocks } from "../hooks/useScrollLock";
 
 interface State { hasError: boolean; message?: string; }
 
@@ -8,7 +9,26 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   static getDerivedStateFromError(err: unknown): State {
     return { hasError: true, message: err instanceof Error ? err.message : "Unknown error" };
   }
-  componentDidCatch(err: unknown) { console.error("[ErrorBoundary]", err); }
+  componentDidCatch(err: unknown) {
+    console.error("[ErrorBoundary]", err);
+    // Heal scroll-lock + inert leaks that would otherwise freeze the page after a render error
+    try {
+      forceReleaseAllScrollLocks();
+    } catch {
+      // ignore
+    }
+    try {
+      const live =
+        document.querySelector<HTMLElement>("[data-keep-dark] > div.relative.flex") ??
+        document.querySelector<HTMLElement>("main");
+      if (live?.hasAttribute("inert")) live.removeAttribute("inert");
+      if (live?.getAttribute("aria-hidden") === "true") live.removeAttribute("aria-hidden");
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+    } catch {
+      // ignore
+    }
+  }
   render() {
     if (this.state.hasError) {
       return (

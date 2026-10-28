@@ -15,7 +15,6 @@ interface AdminUser {
 
 const SUPER_ADMIN_EMAILS = [
   "studyshieldofficial@gmail.com",
-  "studyshieldrecovery@gmail.com",
 ];
 
 // ============================================================

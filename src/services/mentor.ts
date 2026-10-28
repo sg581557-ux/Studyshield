@@ -1,13 +1,20 @@
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 import { todayISODate } from "../lib/constants";
 import { db, statsDb, recoveryDb, goalsDb } from "./db";
 import { revisionDue } from "./planner/revisionEngine";
 import { stripImageMarkers } from "../lib/imageUtils";
 import type { DailyPlanInputs, PlanTask, PlannerGoal, Profile, StudyStats, UserChapter } from "../lib/types";
 
+// Global pending map so SPA navigation doesn't kill the request — the promise
+// lives in the module, not the component. Mentor.tsx re-attaches on remount.
+const pendingMentorByThread = new Map<string, Promise<MentorReplyResult>>();
+export function getPendingMentorPromise(threadId: string): Promise<MentorReplyResult> | null {
+  return pendingMentorByThread.get(threadId) ?? null;
+}
+
 // ============================================================
-// AI Mentor service
+// Echo service
 // ============================================================
 
 export interface MentorChatMessage {
@@ -125,13 +132,15 @@ export class MentorError extends Error {
   kind: MentorErrorKind;
   retryable: boolean;
   status?: number;
+  retryAfter?: number;
 
-  constructor(kind: MentorErrorKind, message: string, opts?: { retryable?: boolean; status?: number }) {
+  constructor(kind: MentorErrorKind, message: string, opts?: { retryable?: boolean; status?: number; retryAfter?: number }) {
     super(message);
     this.name = "MentorError";
     this.kind = kind;
     this.retryable = opts?.retryable ?? false;
     this.status = opts?.status;
+    this.retryAfter = opts?.retryAfter;
   }
 }
 
@@ -141,7 +150,7 @@ export interface MentorReplyResult {
   reason?: string;
   /** Language the mentor actually replied in (detected + preference). */
   language?: string;
-  /** Validated plan-change proposal (AI Mentor → AI Planner), if the
+  /** Validated plan-change proposal (Echo → AI Planner), if the
    *  conversation justified one. The app executes it via the planner
    *  service and shows a "Planner updated" notification. */
   planner?: PlannerChange | null;
@@ -207,21 +216,95 @@ function daysUntilTargetYear(year: string | null): number | null {
   return Math.max(0, Math.ceil((target - Date.now()) / 86400000));
 }
 
+// 8s hard timeout — prevents infinite spinner on flaky networks / RLS hangs
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+async function buildEmptyMentorContext(profile: Profile | null, todayOverride?: string): Promise<MentorContext> {
+  const todayStr = todayOverride ?? todayISODate();
+  return {
+    exam: profile?.target_exam ?? null,
+    examYear: profile?.exam_year ?? null,
+    daysToExam: daysUntilTargetYear(profile?.exam_year ?? null),
+    dailyGoalHours: profile?.daily_goal_hours ?? 0,
+    attendsSchool: profile?.attends_school ?? false,
+    coachingEnabled: profile?.coaching_enabled ?? false,
+    stream: profile?.stream ?? null,
+    schoolClass: profile?.school_class ?? null,
+    board: profile?.board ?? null,
+    academicGoals: profile?.academic_goals ?? [],
+    studyDays: profile?.study_days ?? [],
+    schoolDays: profile?.school_days ?? [],
+    schoolStart: profile?.school_start ?? null,
+    schoolEnd: profile?.school_end ?? null,
+    productiveTime: profile?.productive_time ?? null,
+    productiveSlots: profile?.productive_slots ?? [],
+    desiredSleepHours: profile?.desired_sleep_hours ?? null,
+    testsPerWeek: profile?.tests_per_week ?? null,
+    streak: profile?.longest_streak ?? 0,
+    xp: profile?.xp ?? 0,
+    today: { date: todayStr, plannedMinutes: 0, plannedTaskCount: 0, completedCount: 0, completedMinutes: 0, input: null },
+    last7Days: { completionRate: null, studiedMinutes: 0, plannedCount: 0, completedCount: 0, skippedCount: 0, avgDailyStudyMinutes: 0 },
+    stats: null,
+    chapters: { total: 0, completed: 0, inProgress: 0, notStarted: 0, pendingLectures: 0, pendingQuestions: 0, revisionPending: 0 },
+    subjects: [],
+    revisionDue: [],
+    backlog: { pendingItems: 0, pendingLectures: 0, pendingDpps: 0, pendingModuleQs: 0 },
+    recovery: { pendingCount: 0, pendingMinutes: 0 },
+    focus: { sessionsLast7d: 0, minutesLast7d: 0 },
+    goals: [],
+    weakSubjects: [],
+    strongSubjects: [],
+    mockTests: [],
+    mockSummary: { available: false, count: 0, avgPct: null, bestPct: null, latest: null, bySubject: [], trend: null },
+    checkins: [],
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 export async function buildMentorContext(_userId: string, profile: Profile | null): Promise<MentorContext> {
   const today = todayISODate();
   const weekAgo = daysAgoISODate(7);
 
-  const [stats, chapters, backlog, recovery, tasks, focusSessions, dailyInputs, goals, checkins] = await Promise.all([
-    statsDb.get().catch(() => null),
-    db.getUserChapters().catch(() => [] as UserChapter[]),
-    db.getBacklogItems(profile?.target_exam).catch(() => []),
-    recoveryDb.getPending().catch(() => []),
-    db.getAllTasks().catch(() => [] as PlanTask[]),
-    db.getFocusSessions().catch(() => []),
-    db.getDailyPlanInputs(today).catch(() => null),
-    goalsDb.getActive().catch(() => [] as PlannerGoal[]),
-    db.getRecentCheckins(7).catch(() => []),
-  ]);
+  // If Supabase client is not configured, return an empty but valid context
+  // immediately so Echo can still open in offline mode.
+  if (!supabase) {
+    console.warn("[mentor] buildMentorContext: Supabase client is null — returning empty context");
+    const empty = await buildEmptyMentorContext(profile, today);
+    return empty;
+  }
+
+  const CONTEXT_TIMEOUT_MS = 8000;
+
+  let stats, chapters, backlog, recovery, tasks, focusSessions, dailyInputs, goals, checkins;
+  try {
+    [stats, chapters, backlog, recovery, tasks, focusSessions, dailyInputs, goals, checkins] = await withTimeout(
+      Promise.all([
+        statsDb.get().catch(() => null),
+        db.getUserChapters().catch(() => [] as UserChapter[]),
+        db.getBacklogItems(profile?.target_exam).catch(() => []),
+        recoveryDb.getPending().catch(() => []),
+        db.getAllTasks().catch(() => [] as PlanTask[]),
+        db.getFocusSessions().catch(() => []),
+        db.getDailyPlanInputs(today).catch(() => null),
+        goalsDb.getActive().catch(() => [] as PlannerGoal[]),
+        db.getRecentCheckins(7).catch(() => []),
+      ]),
+      CONTEXT_TIMEOUT_MS,
+      "[mentor] buildMentorContext main fetch",
+    );
+  } catch (e) {
+    console.error("[mentor] buildMentorContext main fetch failed/timed out", e);
+    // Return empty context so the chat still opens — offline fallback will answer
+    return buildEmptyMentorContext(profile, today);
+  }
 
   const todayTasks = tasks.filter((t) => t.scheduled_date === today);
   const lastWeekTasks = tasks.filter((t) => (t.scheduled_date ?? "") >= weekAgo);
@@ -279,7 +362,13 @@ export async function buildMentorContext(_userId: string, profile: Profile | nul
     .map((b) => ({ ...b, avgConfidence: Math.round((b.avgConfidence / Math.max(1, b.total)) * 10) / 10 }))
     .sort((a, b) => b.notStarted + b.pendingLectures - (a.notStarted + a.pendingLectures));
 
-  const mockResults = await db.getMockTests();
+  let mockResults: Awaited<ReturnType<typeof db.getMockTests>> = [];
+  try {
+    mockResults = await withTimeout(db.getMockTests(), 4000, "[mentor] mock fetch");
+  } catch (e) {
+    console.warn("[mentor] mock fetch timed out/failed, using empty", e);
+    mockResults = [];
+  }
   const withPct = mockResults.map((m) => ({
     m,
     pct: Number(m.total_marks) > 0 ? (Number(m.obtained_marks) / Number(m.total_marks)) * 100 : 0,
@@ -400,16 +489,26 @@ export async function buildMentorContext(_userId: string, profile: Profile | nul
 
 export async function listMentorThreads(): Promise<MentorThread[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("mentor_threads")
-    .select("id, title, created_at, updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(20);
-  if (error) {
-    console.error("[mentor] listMentorThreads", error);
+  try {
+    const promise = supabase
+      .from("mentor_threads")
+      .select("id, title, created_at, updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    const { data, error } = await withTimeout(
+      promise as unknown as Promise<{ data: unknown; error: unknown }>,
+      6000,
+      "listMentorThreads",
+    ) as { data: MentorThread[] | null; error: unknown };
+    if (error) {
+      console.error("[mentor] listMentorThreads", error);
+      return [];
+    }
+    return (data ?? []) as MentorThread[];
+  } catch (e) {
+    console.error("[mentor] listMentorThreads timed out/failed", e);
     return [];
   }
-  return (data ?? []) as MentorThread[];
 }
 
 export async function createMentorThread(title = "Mentor chat"): Promise<MentorThread | null> {
@@ -426,19 +525,49 @@ export async function createMentorThread(title = "Mentor chat"): Promise<MentorT
   return data as MentorThread;
 }
 
+export async function deleteMentorThread(threadId: string): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.from("mentor_threads").delete().eq("id", threadId);
+  if (error) {
+    console.error("[mentor] deleteMentorThread", error);
+    return false;
+  }
+  return true;
+}
+
+export async function deleteAllMentorThreads(): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.from("mentor_threads").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  if (error) {
+    console.error("[mentor] deleteAllMentorThreads", error);
+    return false;
+  }
+  return true;
+}
+
 export async function getMentorMessages(threadId: string): Promise<MentorChatMessage[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("mentor_messages")
-    .select("role, content")
-    .eq("thread_id", threadId)
-    .order("created_at", { ascending: true })
-    .limit(200);
-  if (error) {
-    console.error("[mentor] getMentorMessages", error);
+  try {
+    const promise = supabase
+      .from("mentor_messages")
+      .select("role, content")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+      .limit(200);
+    const { data, error } = await withTimeout(
+      promise as unknown as Promise<{ data: unknown; error: unknown }>,
+      6000,
+      "getMentorMessages",
+    ) as { data: MentorChatMessage[] | null; error: unknown };
+    if (error) {
+      console.error("[mentor] getMentorMessages", error);
+      return [];
+    }
+    return (data ?? []) as MentorChatMessage[];
+  } catch (e) {
+    console.error("[mentor] getMentorMessages timed out/failed", e);
     return [];
   }
-  return (data ?? []) as MentorChatMessage[];
 }
 
 async function addMentorMessage(threadId: string, role: "user" | "assistant", content: string): Promise<void> {
@@ -464,10 +593,10 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // Turn a raw functions.invoke error into a descriptive MentorError.
 export async function classifyMentorError(raw: unknown): Promise<MentorError> {
   if (raw instanceof FunctionsFetchError) {
-    return new MentorError("network", "Network error — couldn't reach the AI Mentor service. Check your connection and retry.", { retryable: true });
+    return new MentorError("network", "Network error — couldn't reach the Echo service. Check your connection and retry.", { retryable: true });
   }
   if (raw instanceof FunctionsRelayError) {
-    return new MentorError("relay", "The AI Mentor service failed to respond. Please retry.", { retryable: true });
+    return new MentorError("relay", "The Echo service failed to respond. Please retry.", { retryable: true });
   }
   if (raw instanceof FunctionsHttpError) {
     // In functions-js (used by supabase-js v2.45), `context` IS the raw
@@ -475,9 +604,34 @@ export async function classifyMentorError(raw: unknown): Promise<MentorError> {
     const context = raw.context as Response | undefined;
     const status = context?.status ?? 0;
     let message = "";
+    let details = "";
+    let retryAfter: number | undefined;
     try {
-      const j = await context?.json();
-      message = (j?.message ?? j?.error ?? "") as string;
+      const j = (await context?.json()) as { message?: string; error?: string; details?: string; retryAfter?: number } | null;
+      // Server now returns { message, error, details, retryAfter } — prefer the most
+      // human-readable field, but never drop `details` which holds the
+      // provider's real error (e.g. 402 insufficient credits vs generic 502).
+      details = (j?.details ?? "") as string;
+      const rawMsg = (j?.message ?? j?.error ?? "") as string;
+      if (j?.retryAfter) retryAfter = Number(j.retryAfter) || undefined;
+      // If server sent a structured error object, stringify it; otherwise use string.
+      message = typeof rawMsg === "string" ? rawMsg : JSON.stringify(rawMsg).slice(0, 400);
+      // For 502 llm_error the server now puts the provider summary in `message`
+      // already, but fall back to `details` if message is the old generic one.
+      if ((!message || message === "The AI provider returned an error. Please try again.") && details) {
+        message = details;
+      } else if (details && details !== message) {
+        // Append provider details when they add context (e.g. "model not found" + upstream text)
+        const lower = message.toLowerCase();
+        if (!lower.includes(details.toLowerCase().slice(0, 20))) {
+          message = `${message} — ${details}`.slice(0, 500);
+        }
+      }
+      // Also check header as fallback
+      if (!retryAfter) {
+        const header = (context?.headers as unknown as Headers | undefined)?.get?.("retry-after");
+        if (header) retryAfter = parseInt(header) || undefined;
+      }
     } catch {
       // json() failed — keep the empty fallback
     }
@@ -485,22 +639,31 @@ export async function classifyMentorError(raw: unknown): Promise<MentorError> {
       case 401:
         return new MentorError("auth", "Your session expired or is invalid. Sign out, log in again, then retry.", { status });
       case 403:
-        return new MentorError("auth", "The AI Mentor service denied access. Sign in again and retry.", { status });
+        return new MentorError("auth", "The Echo service denied access. Sign in again and retry.", { status });
       case 404:
-        return new MentorError("not_deployed", "The AI Mentor service isn't deployed yet. Run `supabase functions deploy mentor-chat` to enable live answers.", { status });
-      case 429:
-        return new MentorError("rate_limited", message || "The AI provider is rate-limiting requests. Wait a minute and retry.", { retryable: true, status });
+        return new MentorError("not_deployed", "The Echo service isn't deployed yet. Run `supabase functions deploy mentor-chat` to enable live answers.", { status });
+      case 429: {
+        // retryAfter already extracted from JSON body in the try above, fallback to header or 8s
+        if (!retryAfter) {
+          try {
+            const header = (context?.headers as unknown as Headers | undefined)?.get?.("retry-after");
+            if (header) retryAfter = parseInt(header) || undefined;
+          } catch {}
+        }
+        retryAfter = retryAfter ?? 8;
+        return new MentorError("rate_limited", message || `Echo is handling many requests — retrying automatically in ${retryAfter}s.`, { retryable: true, status, retryAfter });
+      }
       case 503:
-        return new MentorError("not_configured", message || "The AI Mentor service is missing its LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY).", { status });
+        return new MentorError("not_configured", message || "The Echo service is missing its LLM API key (set a FREE key: OPENROUTER_API_KEY, GROQ_API_KEY, or GEMINI_API_KEY).", { status });
       default:
         if (status >= 500) {
-          return new MentorError("server_error", message || `The AI Mentor service failed (HTTP ${status}). Please retry.`, { retryable: true, status });
+          return new MentorError("server_error", message || `The Echo service failed (HTTP ${status}). Please retry.`, { retryable: true, status });
         }
-        return new MentorError("bad_request", message || `The AI Mentor service rejected the request (HTTP ${status}).`, { status });
+        return new MentorError("bad_request", message || `The Echo service rejected the request (HTTP ${status}).`, { status });
     }
   }
   const e = raw as { message?: string };
-  return new MentorError("server_error", e?.message || "Unexpected error while contacting the AI Mentor.", { retryable: true });
+  return new MentorError("server_error", e?.message || "Unexpected error while contacting the Echo.", { retryable: true });
 }
 
 export async function sendMentorMessage(
@@ -509,13 +672,14 @@ export async function sendMentorMessage(
   userText: string,
   history: MentorChatMessage[],
   context: MentorContext,
-  opts?: { persistUser?: boolean; plannerEnabled?: boolean },
+  opts?: { persistUser?: boolean; plannerEnabled?: boolean; isVoice?: boolean },
   language?: string,
   images?: Record<string, MentorImageData>,
 ): Promise<MentorReplyResult> {
   const trimmedText = userText.trim();
   const persistUser = opts?.persistUser !== false;
   const plannerEnabled = opts?.plannerEnabled !== false;
+  const isVoice = opts?.isVoice === true;
 
   if (!supabase) {
     throw new MentorError("network", "App database connection is unavailable. Check your internet connection and retry.", { retryable: true });
@@ -533,55 +697,178 @@ export async function sendMentorMessage(
     throw new MentorError("auth", "You are not signed in. Please log in and try again.");
   }
 
-  let attempts = 0;
-  for (;;) {
-    try {
-      const { data, error } = await supabase.functions.invoke("mentor-chat", {
-        body: {
-          context,
-          messages: [...history, { role: "user", content: trimmedText }],
-          ...(language ? { language } : {}),
-          ...(images && Object.keys(images).length > 0 ? { images } : {}),
-          threadId,
-          plannerEnabled,
-        },
-      });
-      if (error) throw error;
-      const reply: string = data?.reply ?? "";
-      if (!reply) throw new Error("Empty mentor reply");
-      await addMentorMessage(threadId, "assistant", reply);
-      const planner = (data?.planner as PlannerChange | null | undefined) ?? null;
-      return { reply, source: "llm", language: (data?.language as string | undefined) ?? language, planner };
-    } catch (raw) {
-      const err = await classifyMentorError(raw);
-      console.error(
-        `[mentor] send failed kind=${err.kind} status=${err.status ?? "n/a"} thread=${threadId} ` +
-        `messages=${history.length + 1} images=${images ? Object.keys(images).length : 0} ` +
-        `lastUser="${trimmedText.slice(0, 100)}" msg="${err.message}"`,
-      );
-      // Service genuinely unavailable (not deployed / no API key): fall back to
-      // the deterministic offline mentor, and report the real reason.
-      if (err.kind === "not_deployed" || err.kind === "not_configured") {
-        const hasImages = !!images && Object.keys(images).length > 0;
-        const reply = hasImages ? imageOfflineReply() : fallbackMentorReply(trimmedText, context);
-        await addMentorMessage(threadId, "assistant", reply);
-        return { reply, source: "offline", reason: err.message };
+  // Wrap the whole invoke in a keepalive-aware promise that survives SPA navigation
+  const invokeWithKeepalive = async (): Promise<{ data: { reply?: string; language?: string; planner?: PlannerChange | null } | null; error: unknown | null }> => {
+    // Use raw fetch with keepalive:true so the request survives route changes / tab hidden
+    // Falls back to supabase.functions.invoke if direct URL not available (e.g. tests)
+    const sessionToken = sessionData.session!.access_token;
+    const url = supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/mentor-chat` : null;
+    if (url && supabaseAnonKey) {
+      const controller = new AbortController();
+      const timeoutMs = 25000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionToken}`,
+            apikey: supabaseAnonKey,
+          },
+          body: JSON.stringify({
+            context,
+            messages: [...history, { role: "user", content: trimmedText }],
+            ...(language ? { language } : {}),
+            ...(images && Object.keys(images).length > 0 ? { images } : {}),
+            threadId,
+            plannerEnabled,
+            ...(isVoice ? { isVoice: true } : {}),
+          }),
+          keepalive: true,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const json = await res.json().catch(() => null) as { reply?: string; language?: string; planner?: PlannerChange | null; message?: string; error?: string; details?: string; retryAfter?: number } | null;
+        if (!res.ok) {
+          // Mimic FunctionsHttpError shape so classifyMentorError can parse it — include headers for retry-after
+          const fakeResponse = {
+            status: res.status,
+            headers: res.headers,
+            json: async () => json ?? {},
+            clone: () => ({ json: async () => json ?? {}, headers: res.headers, status: res.status } as unknown as Response),
+          } as unknown as Response;
+          throw new FunctionsHttpError(fakeResponse as unknown as string);
+        }
+        return { data: json, error: null };
+      } catch (e) {
+        clearTimeout(timeoutId);
+        if ((e as Error)?.name === "AbortError") {
+          // Throw a retryable network error with a clear timeout message — will auto-retry and fallback to data answer
+          throw new MentorError("network", "Echo request timed out after 25s — please tap Retry. If you asked to create today's plan, it may already be saved; check the Planner.", { retryable: true });
+        }
+        // If fetch threw due to network, rethrow as FunctionsFetchError for retry logic
+        if (e instanceof FunctionsHttpError) throw e;
+        if (e instanceof MentorError) throw e;
+        if (e instanceof FunctionsFetchError) throw e;
+        throw e;
       }
-      // One automatic retry for temporary failures (network/relay/5xx/429)
-      if (attempts === 0 && err.retryable) {
-        attempts = 1;
-        await delay(900);
-        continue;
-      }
-      throw err;
     }
+    // Fallback — supabase-js invoke (also keepalive via fetch under the hood in newer supabase-js)
+    const { data, error } = await supabase.functions.invoke("mentor-chat", {
+      body: {
+        context,
+        messages: [...history, { role: "user", content: trimmedText }],
+        ...(language ? { language } : {}),
+        ...(images && Object.keys(images).length > 0 ? { images } : {}),
+        threadId,
+        plannerEnabled,
+        ...(isVoice ? { isVoice: true } : {}),
+      },
+    });
+    return { data: data as { reply?: string; language?: string; planner?: PlannerChange | null } | null, error };
+  };
+
+  // If already sending for this thread (user double-tapped or navigated and back), reuse the same promise
+  const pendingKey = threadId;
+  const existingPending = pendingMentorByThread.get(pendingKey);
+  if (existingPending) return existingPending;
+
+  const task: Promise<MentorReplyResult> = (async () => {
+    let attempts = 0;
+    for (;;) {
+      try {
+        const { data, error } = await invokeWithKeepalive();
+        if (error) throw error;
+        const reply: string = data?.reply ?? "";
+        if (!reply) throw new Error("Empty mentor reply");
+        await addMentorMessage(threadId, "assistant", reply);
+        const planner = (data?.planner as PlannerChange | null | undefined) ?? null;
+        return { reply, source: "llm", language: (data?.language as string | undefined) ?? language, planner };
+      } catch (raw) {
+        const err = await classifyMentorError(raw);
+        console.error(
+          `[mentor] send failed kind=${err.kind} status=${err.status ?? "n/a"} thread=${threadId} ` +
+          `messages=${history.length + 1} images=${images ? Object.keys(images).length : 0} ` +
+          `lastUser="${trimmedText.slice(0, 100)}" msg="${err.message}"`,
+        );
+        // Service genuinely unavailable (not deployed / no API key): fall back to
+        // the deterministic offline mentor, and report the real reason.
+        if (err.kind === "not_deployed" || err.kind === "not_configured") {
+          const hasImages = !!images && Object.keys(images).length > 0;
+          const reply = hasImages ? imageOfflineReply() : fallbackMentorReply(trimmedText, context);
+          await addMentorMessage(threadId, "assistant", reply);
+          return { reply, source: "offline", reason: err.message };
+        }
+        // Retry logic — rate_limited gets special exponential backoff because OpenRouter free tier is bursty
+        if (err.kind === "rate_limited" && attempts < 2) {
+          const baseMs = err.retryAfter ? err.retryAfter * 1000 : 1500 * (attempts + 1);
+          const jitter = Math.random() * 400;
+          const backoff = Math.min(8000, baseMs + jitter);
+          console.warn(`[mentor] rate_limited retry ${attempts + 1}/2 after ${Math.round(backoff)}ms`);
+          await delay(backoff);
+          attempts += 1;
+          continue;
+        }
+        // After 2 rate_limited retries, fall back to data-driven answer so user isn't stuck with just an error
+        if (err.kind === "rate_limited" && attempts >= 2) {
+          const hasImages = !!images && Object.keys(images).length > 0;
+          if (hasImages) {
+            const reply = [
+              "**Direct Answer**\nEcho is handling many requests right now (rate limit) — I can't analyze images at this exact moment.",
+              "**What to do**\nYour image question is saved. Wait ~20s and tap **Retry** — image solving needs the live AI and will work on the next try. Meanwhile, you can describe the question in text and I'll answer from your StudyShield data.",
+            ].join("\n\n");
+            await addMentorMessage(threadId, "assistant", reply);
+            return { reply, source: "offline", reason: "Echo is handling many requests right now (rate limit) — image solving needs the live AI. Wait ~20s and tap Retry." };
+          }
+          const reply = fallbackMentorReply(trimmedText, context);
+          await addMentorMessage(threadId, "assistant", reply);
+          return { reply, source: "offline", reason: "Echo is handling many requests right now (rate limit) — answered from your StudyShield data. Wait ~20s and tap Retry for a fresh AI answer." };
+        }
+        // One automatic retry for other temporary failures (network/relay/5xx/timeout) — fast retry
+        if (attempts === 0 && err.retryable) {
+          attempts = 1;
+          await delay(600);
+          continue;
+        }
+        // After 1 retry, timeout/server errors should fallback to data-driven answer so user isn't stuck with error banner
+        if (attempts >= 1 && (err.kind === "network" || err.kind === "server_error" || err.kind === "relay")) {
+          const isTimeout = err.message.toLowerCase().includes("timed out") || err.message.toLowerCase().includes("taking too long") || err.kind === "network";
+          const hasImages = !!images && Object.keys(images).length > 0;
+          if (hasImages && isTimeout) {
+            const reply = [
+              "**Direct Answer**\nEcho took too long to respond — I can't analyze images at this exact moment.",
+              "**What to do**\nYour image is saved. Tap **Retry** — image solving will work on the next try. Meanwhile, describe the question in text for a data-driven answer.",
+            ].join("\n\n");
+            await addMentorMessage(threadId, "assistant", reply);
+            return { reply, source: "offline", reason: "Echo took too long — image solving needs the live AI. Tap Retry." };
+          }
+          const reply = fallbackMentorReply(trimmedText, context);
+          await addMentorMessage(threadId, "assistant", reply);
+          const reason = isTimeout
+            ? "Echo took too long to respond — answered from your StudyShield data. Tap Retry for a fresh AI answer."
+            : `Echo had a hiccup (${err.kind}) — answered from your StudyShield data. Tap Retry for AI.`;
+          return { reply, source: "offline", reason };
+        }
+        // For all other retryable errors (server_error / network / relay / timeout), surface the error
+        // deployment misconfiguration (not_deployed / not_configured) which is already handled above,
+        // plus the rate_limited soft-fallback above.
+        throw err;
+      }
+    }
+  })();
+
+  pendingMentorByThread.set(pendingKey, task);
+  try {
+    return await task;
+  } finally {
+    pendingMentorByThread.delete(pendingKey);
   }
 }
 
 /** Canned reply when the live AI service is unavailable for image solving. */
 function imageOfflineReply(): string {
   return [
-    "**Direct Answer**\nI can't analyze images right now — the live AI Mentor service isn't reachable, and image solving needs it.",
+    "**Direct Answer**\nI can't analyze images right now — the live Echo service isn't reachable, and image solving needs it.",
     "**What to do**\n1. Make sure the `mentor-chat` Supabase edge function is deployed.\n2. Set an `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`) secret on it.\n3. Try again — your question is saved in this chat.",
   ].join("\n\n");
 }

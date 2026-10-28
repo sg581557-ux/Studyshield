@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
+import { CrazyInlineLoader } from '../components/loaders/AestheticLoader';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
@@ -479,10 +480,10 @@ export default function Landing() {
         <TrustedBy />
         <Features />
         <HowItWorks />
-        <Suspense fallback={<section id="showcase" className="min-h-[900px]" />}>
+        <Suspense fallback={<div className="min-h-[900px] flex items-center justify-center"><CrazyInlineLoader message="Loading showcase…" size="lg" /></div>}>
           <AIPlannerShowcase />
         </Suspense>
-        <Suspense fallback={<section id="mentor" className="min-h-[700px]" />}>
+        <Suspense fallback={<div className="min-h-[700px] flex items-center justify-center"><CrazyInlineLoader message="Loading Echo preview…" size="lg" /></div>}>
           <AIMentorShowcase />
         </Suspense>
         <Stats />

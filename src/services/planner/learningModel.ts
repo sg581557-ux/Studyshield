@@ -1,5 +1,6 @@
 import type { PlanTask, StudyStats } from "../../lib/types";
 import { db } from "../db";
+import { localISODate } from "../../lib/date";
 
 const DEFAULT_DURATIONS = {
   lecture: 120, dpp: 30, module: 45, pyq: 45, revision: 25,
@@ -48,7 +49,39 @@ export function analyzeSubjects(completedTasks: PlanTask[]): { weak: string[]; s
 export async function updateStudyStats(): Promise<void> {
   try {
     const recent = await db.getRecentCompletedTasks(30);
-    if (recent.length === 0) return;
+    const existing = await db.getStudyStats();
+
+    // Compute streak including both completed tasks AND plan generation (daily_plan_inputs)
+    // so generating a plan counts toward streak max 1/day even before any task is completed.
+    const planInputs = await db.getAllDailyPlanInputs().catch(() => []);
+    const planDates = new Set(planInputs.map((p) => p.plan_date));
+    const computedStreak = computeCurrentStreakWithPlans(recent, planDates);
+    const streakDays = computedStreak;
+
+    // Sync profile longest_streak when we beat the record
+    if (existing) {
+      try {
+        const { supabase } = await import("../../lib/supabase");
+        const { data } = await supabase!.auth.getSession();
+        const uid = data.session?.user?.id;
+        if (uid) {
+          const profile = await db.getProfile(uid).catch(() => null);
+          if (profile && computedStreak > (profile.longest_streak ?? 0)) {
+            await db.upsertProfile({ id: uid, longest_streak: computedStreak }).catch(() => {});
+          }
+        }
+      } catch {
+        // ignore profile sync failures — study_stats still saves
+      }
+    }
+
+    if (recent.length === 0 && planDates.size === 0) {
+      // No data at all — ensure streak 0 if stats row exists
+      if (existing && existing.streak_days !== 0) {
+        await db.upsertStudyStats({ streak_days: 0 });
+      }
+      return;
+    }
 
     const byType = new Map<string, { totalMin: number; count: number }>();
     for (const t of recent) {
@@ -73,9 +106,6 @@ export async function updateStudyStats(): Promise<void> {
     const QUESTION_TYPES = new Set(["dpp", "module", "pyq", "practice"]);
     const questionsSolvedThisBatch = recent.filter((t) => t.completed && QUESTION_TYPES.has(t.type)).length;
 
-    const existing = await db.getStudyStats();
-    const streakDays = Math.max(existing?.streak_days ?? 0, computeCurrentStreak(recent));
-
     await db.upsertStudyStats({
       avg_lecture_min: avg("lecture"),
       avg_dpp_min: avg("dpp"),
@@ -98,18 +128,27 @@ export async function updateStudyStats(): Promise<void> {
   }
 }
 
-function computeCurrentStreak(tasks: PlanTask[]): number {
-  if (tasks.length === 0) return 0;
-  const dates = new Set(tasks.filter((t) => t.completed && t.scheduled_date).map((t) => t.scheduled_date!));
+export function computeCurrentStreak(tasks: PlanTask[]): number {
+  return computeCurrentStreakWithPlans(tasks, new Set());
+}
+
+export function computeCurrentStreakWithPlans(tasks: PlanTask[], planDates: Set<string>): number {
+  const taskDates = new Set(
+    tasks
+      .filter((t) => (t.completed || t.task_status === "completed") && t.scheduled_date)
+      .map((t) => t.scheduled_date!)
+  );
+  const dates = new Set<string>([...taskDates, ...planDates]);
+  if (dates.size === 0) return 0;
   let streak = 0;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const d = new Date(today);
   for (let i = 0; i < 365; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const ds = d.toISOString().slice(0, 10);
+    if (i > 0) d.setDate(d.getDate() - 1);
+    const ds = localISODate(d);
     if (dates.has(ds)) streak++;
-    else if (i > 0) break;
+    else break;
   }
   return streak;
 }

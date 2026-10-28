@@ -43,7 +43,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         {...props}
       >
-        {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+        {loading && <span className="relative flex h-4 w-4 items-center justify-center"><span className="absolute inset-0 rounded-full border-2 border-white/20" /><span className="absolute inset-0 rounded-full border-2 border-t-white animate-spin" style={{animationDuration:"0.7s"}} /></span>}
         {children}
       </button>
     );

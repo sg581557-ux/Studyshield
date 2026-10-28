@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
-import { supabase, OAUTH_REDIRECT_URL, RESET_PASSWORD_REDIRECT_URL, SIGNUP_REDIRECT_URL } from "../lib/supabase";
+import { supabase, getOAuthCallbackUrl, getSignupCallbackUrl } from "../lib/supabase";
 import { db } from "../services/db";
 import { friendlyAuthError, stringifyError } from "../lib/authErrors";
 import { useToast } from "./ToastContext";
@@ -47,6 +47,8 @@ export const useAuth = () => {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the subscription effect.
   const bootedRef = useRef(false);
 
-  async function loadProfile(uid: string, email: string, fullName: string | null, avatarUrl?: string | null) {
+  const loadProfile = useCallback(async (uid: string, email: string, fullName: string | null, avatarUrl?: string | null) => {
     const n = ++profileLoads.current;
     setProfileLoading(true);
     try {
@@ -80,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       if (profileLoads.current === n) setProfileLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     // Subscribe to auth state changes FIRST — never gate app boot on
@@ -111,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !bootedRef.current) {
         bootedRef.current = true;
+        prevUserRef.current = session.user;
         setUser(session.user);
         const um = session.user.user_metadata ?? {};
         const fullName = um.full_name ?? um.name ?? null;
@@ -128,23 +131,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const hadSession = Boolean(prevUserRef.current);
+      const sameUser = prevUserRef.current?.id === session?.user?.id;
+      const isSameUserId = session?.user?.id != null && prevUserRef.current?.id === session.user.id;
       prevUserRef.current = session?.user ?? null;
       setUser(session?.user ?? null);
       if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
         setLoading(false);
       }
-       (async () => {
+      // Background token refresh for same user — never reload profile, never flash loader.
+      // This fires on visibilitychange and Supabase autoRefreshToken polling every few seconds.
+      // Without this, Layout unmounts to FullPageLoader and the sidebar flickers in every browser.
+      if (event === "TOKEN_REFRESHED" && isSameUserId) {
+        setLoading(false);
+        return;
+      }
+      if (event === "TOKEN_REFRESHED" && sameUser) {
+        // Fallback for case where ids match via sameUser check
+        setLoading(false);
+        return;
+      }
+      // Transient null session during refresh — ignore, don't clear profile and don't redirect.
+      if (event === "TOKEN_REFRESHED" && !session?.user) {
+        setLoading(false);
+        return;
+      }
+        (async () => {
         try {
           if (session?.user) {
             const um = session.user.user_metadata ?? {};
             const fullName = um.full_name ?? um.name ?? null;
             const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
+            // Double guard: skip profile round-trip on pure token refresh when same user.
+            if (event === "TOKEN_REFRESHED" && isSameUserId) return;
+            if (event === "TOKEN_REFRESHED" && sameUser) return;
             await loadProfile(session.user.id, session.user.email ?? "", fullName, avatarUrl);
           } else {
             if (event === "SIGNED_OUT" && hadSession) {
-              toast.info("Your session expired. Please sign in again.");
+              // Use ref to avoid effect dep on toast
+              toastRef.current.info("Your session expired. Please sign in again.");
             }
-            setProfile(null);
+            // Only clear profile on explicit SIGNED_OUT, not transient null during refresh
+            if (event === "SIGNED_OUT" || event === "USER_DELETED") {
+              setProfile(null);
+            } else if (!session?.user && hadSession && event !== "TOKEN_REFRESHED") {
+              setProfile(null);
+            }
           }
         } catch (err) {
           console.error("[auth] onAuthStateChange threw", err);
@@ -153,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => sub.subscription.unsubscribe();
-  }, [toast]);
+  }, [loadProfile]);
 
   async function signIn(email: string, password: string) {
     if (!supabase) throw new Error("Supabase client not initialized");
@@ -162,16 +193,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
   async function signInWithGoogle() {
     if (!supabase) throw new Error("Supabase client not initialized");
-    // Redirect flow: the browser leaves for Google and returns to
-    // /auth/callback with the tokens. detectSessionInUrl exchanges them,
-    // loadProfile() creates the profile for new users, and the callback
-    // page routes to onboarding or the dashboard. access_type=offline lets
-    // Supabase exchange for a refresh token; prompt=consent guarantees
-    // Google issues one on first auth.
+    // Runtime-computed callback — must be a host that actually serves the SPA for deep links.
+    // workers.dev always works (not_found_handling=single-page-application); studyshield.study
+    // currently 404s for /auth/callback until its Cloudflare zone is active.
+    const redirectTo = getOAuthCallbackUrl();
+    console.info(`[auth] signInWithGoogle redirectTo=${redirectTo}`);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: OAUTH_REDIRECT_URL,
+        redirectTo,
         queryParams: { access_type: "offline", prompt: "consent" },
       },
     });
@@ -179,17 +209,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
   async function signUp(name: string, email: string, password: string) {
     if (!supabase) throw new Error("Supabase client not initialized");
-    // When the project requires email confirmation (mailer_autoconfirm=false,
-    // the default for new Supabase projects), signUp returns a user but NO
-    // session — the caller must route to a "check your email" state. The
-    // confirmation email links back to /auth/callback, which auto-logs the
-    // user in after verification and sends them to onboarding.
+    const emailRedirectTo = getSignupCallbackUrl();
+    console.info(`[auth] signUp emailRedirectTo=${emailRedirectTo}`);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { full_name: name },
-        emailRedirectTo: SIGNUP_REDIRECT_URL,
+        emailRedirectTo,
       },
     });
     if (error) throw error;
@@ -203,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function forgotPassword(email: string) {
     if (!supabase) throw new Error("Supabase client not initialized");
     const normalized = email.trim();
-    const redirectTo = RESET_PASSWORD_REDIRECT_URL;
+    const redirectTo = "https://studyshield.sg581557.workers.dev/reset-password";
     console.info(`[auth] forgot-password: requesting reset link for "${normalized}" -> ${redirectTo}`);
     try {
       const { data, error } = await supabase.auth.resetPasswordForEmail(normalized, {
@@ -230,14 +257,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Failed to send password reset email.", { cause: err });
     }
   }
-   async function refreshProfile() {
-     if (user) {
-       const um = user.user_metadata ?? {};
-       const fullName = um.full_name ?? um.name ?? null;
-       const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
-       await loadProfile(user.id, user.email ?? "", fullName, avatarUrl);
-     }
-   }
+   // Debounced refresh to avoid 3-4 loader flashes when multiple mutations fire rapidly
+   // (e.g. Backlog +1 clicks). Rapid calls coalesce to a single loadProfile 350ms after last.
+   const refreshTimeoutRef = useRef<number | null>(null);
+   useEffect(() => () => {
+     if (refreshTimeoutRef.current) window.clearTimeout(refreshTimeoutRef.current);
+   }, []);
+   const refreshProfile = useCallback(() => {
+     if (!user) return Promise.resolve();
+     // If already debouncing, reset timer — only last call wins
+     if (refreshTimeoutRef.current) window.clearTimeout(refreshTimeoutRef.current);
+     return new Promise<void>((resolve, reject) => {
+       refreshTimeoutRef.current = window.setTimeout(async () => {
+         refreshTimeoutRef.current = null;
+         const um = user.user_metadata ?? {};
+         const fullName = um.full_name ?? um.name ?? null;
+         const avatarUrl = um.picture ?? um.avatar_url ?? um.photo_url ?? null;
+         try {
+           await loadProfile(user.id, user.email ?? "", fullName, avatarUrl);
+           resolve();
+         } catch (e) {
+           reject(e as Error);
+         }
+       }, 350);
+     });
+   }, [user, loadProfile]);
 
   return (
     <AuthContext.Provider

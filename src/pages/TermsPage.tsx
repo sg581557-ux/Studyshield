@@ -48,7 +48,7 @@ const SECTIONS = [
   },
   {
     title: "12. Contact",
-    body: "Questions about these terms? Email support@studyshield.study.",
+    body: "Questions about these terms? Email studyshieldofficial@gmail.com.",
   },
 ];
 

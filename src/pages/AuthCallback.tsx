@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ShieldCheck, Loader2, AlertTriangle } from "lucide-react";
+import { ShieldCheck, AlertTriangle } from "lucide-react";
+import { CrazyInlineLoader } from "../components/loaders/AestheticLoader";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
 
@@ -18,7 +19,7 @@ import { supabase } from "../lib/supabase";
 // initialisation) and only gives up after a generous grace period.
 
 const GRACE_MS = 15000; // wait for the OAuth exchange on slow mobile networks
-const POLL_MS = 2500;   // session recovery poll interval
+const POLL_MS = 3500;   // session recovery poll interval — slightly longer to avoid rapid reload flicker
 
 function pendingOAuthTokens(): { code: string | null; accessToken: string | null } {
   const q = new URLSearchParams(window.location.search);
@@ -56,22 +57,28 @@ export default function AuthCallback() {
   }, []);
 
   // Session recovery poll: if AuthContext missed the event (listener race),
-  // getSession() is authoritative — it has already processed the callback
-  // URL. If it finds a session the context doesn't know about, reload once
-  // so a fresh boot emits INITIAL_SESSION and the app picks it up.
+  // getSession() is authoritative. We avoid a hard reload unless the page is
+  // visible and we have seen the session twice (to avoid single-poll flicker).
+  // This was previously a 2.5s interval with immediate reload → 3-4 perceived refreshes.
   useEffect(() => {
     if (navigatedRef.current || oauthError || user || !supabase) return;
     const client = supabase;
+    let consecutiveHits = 0;
     const t = window.setInterval(() => {
+      // Don't reload while tab hidden (user clicking elsewhere triggers visibilitychange)
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       void client.auth.getSession()
         .then(({ data: { session } }) => {
           if (navigatedRef.current || user) return;
           if (session?.user) {
-            if (!reloadedRef.current) {
+            consecutiveHits += 1;
+            if (consecutiveHits >= 2 && !reloadedRef.current) {
               reloadedRef.current = true;
               console.warn("[auth-callback] context missed the session event — reloading to pick it up");
               window.location.reload();
             }
+          } else {
+            consecutiveHits = 0;
           }
         })
         .catch((err) => console.error("[auth-callback] session poll failed", err));
@@ -138,10 +145,7 @@ export default function AuthCallback() {
             </>
           ) : (
             <>
-              <Loader2 className="w-6 h-6 text-accent-400 animate-spin mx-auto" />
-              <p className="text-sm text-slate-300">
-                {timedOut ? "Still working…" : "Signing you in — just a moment."}
-              </p>
+              <CrazyInlineLoader message={timedOut ? "Still working… we're securing your session" : "Signing you in — just a moment…"} />
               {timedOut && (
                 <p className="text-xs text-slate-500">
                   If you are still seeing this page after a few more seconds,{" "}

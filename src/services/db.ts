@@ -1,15 +1,15 @@
 import { supabase } from "../lib/supabase";
 import { isNetworkError } from "../lib/authErrors";
-import { examIdForOnboarding, coachingLabel, ONBOARDING_STEP_COUNT } from "../lib/onboarding";
 import { seedFormulasForExam } from "../lib/formulaData";
+import { sanitizeProfilePayload, fallbackLegacyPayload, sanitizeBacklogRowInput, isInvalidTypeError } from "../lib/profilePayload";
 import type {
   BacklogItem, DailyPlanInputs, DailyPlanInputsInput, FocusSession, Formula,
   FormulaBookmark, MockTestResult, OnboardingInput, OnboardingBacklog,
   PlanTask, Priority, Profile, SyllabusChapter, SyllabusExam, SyllabusSubject,
   UserChapter, ChapterStatus, BacklogDetailInput, BacklogKind, ModuleProgress,
-  StudyMode, RecoveryItem, RecoveryItemInput, StudyStats, PlannerGoal,
+  RecoveryItem, RecoveryItemInput, StudyStats, PlannerGoal,
   PlannerGoalInput, TaskStatus, MentorDailyCheckin, MentorMemory,
-  SmartBacklogInput, BacklogResourceProgress, ClassScheduleEntry,
+  SmartBacklogInput, BacklogResourceProgress,
   ChapterProgressPatch,
 } from "../lib/types";
 import { remainingOf, resourceSummary, resourceMeta, extractBacklogResources, examIdMatchSet, backlogExamFamily } from "../lib/backlogMeta";
@@ -99,6 +99,75 @@ export function logProfileSaveFailure(source: string, table: string, payload: un
   console.error("  complete error:", error);
 }
 
+/**
+ * Resilient backlog insert/update helpers — live DB was missing columns
+ * (completed_at, difficulty, estimated_minutes) so every add failed with
+ * PGRST204 "Could not find the 'X' column … in the schema cache".
+ * Instead of crashing, we strip the missing column and retry so the row
+ * still saves. The migration 20260907120000 adds the columns for future
+ * installs; this fallback keeps older DBs working until they migrate.
+ */
+function isMissingColumnError(error: unknown): string | null {
+  return missingColumnFromError(error);
+}
+
+function isGeneratedColumnError(error: unknown): string | null {
+  const e = error as { code?: string; message?: string };
+  if (e?.code === "428C9" && e?.message?.includes("module_questions_remaining")) return "module_questions_remaining";
+  return null;
+}
+
+function stripColumns(payload: Record<string, unknown>, cols: string[]): Record<string, unknown> {
+  const next = { ...payload };
+  for (const c of cols) delete next[c];
+  return next;
+}
+
+async function insertBacklogWithFallback(
+  c: ReturnType<typeof assertClient>,
+  row: Record<string, unknown>,
+): Promise<BacklogItem> {
+  let payload: Record<string, unknown> = { ...row };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await c.from("backlog_items").insert(payload).select("*").maybeSingle();
+    if (!error) {
+      const item = (data as BacklogItem) ?? null;
+      if (!item) throw new Error("Failed to create backlog item");
+      return item;
+    }
+    const missing = isMissingColumnError(error) ?? isGeneratedColumnError(error);
+    if (missing && payload.hasOwnProperty(missing)) {
+      console.warn(`[db.insertBacklogWithFallback] stripping missing/generated column '${missing}' and retrying`, error);
+      payload = stripColumns(payload, [missing]);
+      continue;
+    }
+    console.error("[db.insertBacklogWithFallback]", error);
+    throw error;
+  }
+  throw new Error("insertBacklogWithFallback: too many retries");
+}
+
+async function updateBacklogWithFallback(
+  c: ReturnType<typeof assertClient>,
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<BacklogItem | null> {
+  let payload: Record<string, unknown> = { ...patch };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await c.from("backlog_items").update(payload).eq("id", id).select("*").maybeSingle();
+    if (!error) return (data as BacklogItem) ?? null;
+    const missing = isMissingColumnError(error) ?? isGeneratedColumnError(error);
+    if (missing && payload.hasOwnProperty(missing)) {
+      console.warn(`[db.updateBacklogWithFallback] stripping missing/generated column '${missing}' and retrying`, error);
+      payload = stripColumns(payload, [missing]);
+      continue;
+    }
+    console.error("[db.updateBacklogWithFallback]", error);
+    throw error;
+  }
+  return null;
+}
+
 function assertClient() {
   if (!supabase) throw new Error("Supabase client not initialized");
   return supabase;
@@ -169,7 +238,17 @@ export const db = {
   async upsertProfile(patch: Partial<Profile> & { id: string }): Promise<Profile | null> {
     const c = assertClient();
     try {
-      const { data, error } = await c.from("profiles").upsert({ ...patch, updated_at: new Date().toISOString() }).select("*").maybeSingle();
+      const payload = { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>;
+      const { data, error } = await c.from("profiles").upsert(payload).select("*").maybeSingle();
+      if (error && isInvalidTypeError(error)) {
+        console.warn("[db.upsertProfile] 22P02 — retrying with legacy fallback", error);
+        const fallback: Record<string, unknown> = { ...payload };
+        if (typeof fallback.target_exam === "string") fallback.target_exam = [fallback.target_exam as string];
+        if (typeof fallback.exam_year === "string" && /^\d{4}$/.test(fallback.exam_year as string)) fallback.exam_year = Number(fallback.exam_year);
+        const { data: fbData, error: fbError } = await c.from("profiles").upsert(fallback).select("*").maybeSingle();
+        if (fbError) { logProfileSaveFailure("db.upsertProfile-fallback", "profiles", fallback, fbError); throw fbError; }
+        return (fbData as Profile) ?? null;
+      }
       if (error) { logProfileSaveFailure("db.upsertProfile", "profiles", patch, error); throw error; }
       return (data as Profile) ?? null;
     } catch (err) { console.error("[db.upsertProfile] threw", err); throw err; }
@@ -187,77 +266,9 @@ export const db = {
     const c = assertClient();
     const table = "profiles";
 
-    // Live class blocks → legacy single-window columns + days list (kept in
-    // sync so the old dashboard/planner paths still work).
-    const schedule: ClassScheduleEntry[] = Array.isArray(input.class_schedule)
-      ? input.class_schedule
-          .filter((e) => e && e.day && typeof e.start === "string" && typeof e.end === "string")
-          .map((e) => ({ day: e.day.toLowerCase(), start: e.start, end: e.end }))
-      : [];
-    const WEEKDAY_SHORT: Record<string, string> = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
-    const firstBlock = schedule[0];
-    const coachingEnabled = input.coaching_type !== "self_study" && input.coaching !== "none" && input.coaching !== "";
-
-    const payload: Record<string, unknown> = {
-      id: userId, email,
-      full_name: input.full_name, display_name: input.full_name,
-      age: input.age ? Number(input.age) : null,
-      school_class: input.school_class || null,
-      school_name: input.school_name || null,
-      target_exam: aliasExamId(examIdForOnboarding(input.target_exam)),
-      exam_year: input.exam_year || null,
-      current_level: input.current_level || null,
-      coaching: input.coaching || "none",
-      coaching_type: input.coaching_type || "online",
-      coaching_name: input.coaching_name || coachingLabel(input.coaching, input.coaching_other) || null,
-      wake_up_time: input.wake_up_time || null,
-      sleep_time: input.sleep_time || null,
-      subjects: input.subjects,
-      primary_goal: input.primary_goal || null,
-      custom_goal: input.custom_goal || null,
-      preferred_language: input.preferred_language || null,
-      mentor_tone: input.mentor_tone || null,
-      daily_goal_hours: input.daily_goal_hours,
-      // Coaching flow v2 (AI Planner reads these).
-      class_mode: coachingEnabled ? input.class_mode || null : null,
-      class_schedule: coachingEnabled && input.class_mode === "live" ? schedule : [],
-      lecture_duration: coachingEnabled && input.class_mode === "recorded" ? input.lecture_duration || 60 : null,
-      lectures_per_day: coachingEnabled && input.class_mode === "recorded" ? input.lectures_per_day || 2 : null,
-      preferred_study_time: input.preferred_study_time || "evening",
-      // Onboarding v3 (migration 20260805160000).
-      stream: input.stream || null,
-      academic_goals: Array.isArray(input.academic_goals) ? input.academic_goals : [],
-      board: input.board || null,
-      productive_time: input.productive_time || null,
-      desired_sleep_hours: input.desired_sleep_hours ? Number(input.desired_sleep_hours) : null,
-      tests_per_week: input.tests_per_week || 0,
-      school_days: Array.isArray(input.school_days) ? input.school_days : [],
-      school_start: input.school_start || null,
-      school_end: input.school_end || null,
-      study_days: Array.isArray(input.study_days) ? input.study_days : [],
-      coaching_mode: input.coaching_type || null,
-      // Legacy columns kept in sync for the existing dashboard.
-      coaching_enabled: coachingEnabled,
-      coaching_is_live: coachingEnabled && input.class_mode === "live",
-      coaching_days: schedule.map((e) => WEEKDAY_SHORT[e.day] ?? e.day),
-      coaching_start: firstBlock?.start || "16:00",
-      coaching_end: firstBlock?.end || "19:00",
-      lecture_duration_min: input.lecture_duration || 60,
-      revision_time: input.preferred_study_time && input.preferred_study_time !== "flexible" ? input.preferred_study_time : "evening",
-      study_mode: "balanced" as StudyMode,
-      attends_school: (input.school_days?.length ?? 0) > 0, school_board: input.board || "Other",
-      // Habit calibration (AI Planner habit system).
-      weekday_study_hours: input.weekday_study_hours || null,
-      saturday_study_hours: input.saturday_study_hours > 0 ? input.saturday_study_hours : null,
-      sunday_study_hours: input.sunday_study_hours > 0 ? input.sunday_study_hours : null,
-      session_length_min: input.session_length_min || 45,
-      break_min: input.break_min || 10,
-      days_off: input.days_off ?? [],
-      productive_slots: input.productive_slots ?? [],
-      onboarding_data: input as unknown as Record<string, unknown>,
-      onboarding_completed: true, onboarding_step: ONBOARDING_STEP_COUNT,
-      updated_at: new Date().toISOString(),
-    };
+    // Sanitized payload — every field coerced to its Postgres type to prevent 22P02.
+    // Handles NaN, empty strings, array vs scalar mismatches, and legacy schemas.
+    let payload: Record<string, unknown> = sanitizeProfilePayload(userId, email, input);
 
     // 2. Verify auth: supabase.auth.getUser() + getSession(), auth.uid() match.
     const sessionUser = await currentSessionUser();
@@ -267,12 +278,12 @@ export const db = {
       throw new Error("Your session has expired. Please sign in again.");
     }
 
-    // 5. Required fields / type sanity before sending.
+    // 5. Required fields / type sanity before sending (sanitized payload is authoritative).
     const issues: string[] = [];
     if (!email) issues.push("email is empty");
-    if (!input.full_name?.trim()) issues.push("full_name is empty");
-    if (!Array.isArray(input.subjects)) issues.push("subjects is not an array");
-    if (typeof input.daily_goal_hours !== "number" || !Number.isFinite(input.daily_goal_hours)) issues.push(`daily_goal_hours is not a finite number (${input.daily_goal_hours})`);
+    if (!(payload.full_name as string)?.trim()) issues.push("full_name is empty");
+    if (!Array.isArray(payload.subjects)) issues.push("subjects is not an array");
+    if (typeof payload.daily_goal_hours !== "number" || !Number.isFinite(payload.daily_goal_hours as number)) issues.push(`daily_goal_hours is not a finite number (${payload.daily_goal_hours})`);
     if (issues.length > 0) console.warn("[onboarding-save] payload issues:", issues);
 
     // 8. Print the full payload before sending.
@@ -291,7 +302,7 @@ export const db = {
     // 6 + 10. Upsert (onConflict id prevents duplicates); retry once on network
     // failure. After the write, RE-SELECT the row and verify it persisted —
     // only then report success. One full retry of (upsert + verify) on
-    // transient failures before giving up.
+    // transient failures before giving up. Handles 22P02 type errors with legacy fallback.
     const persist = async (): Promise<Profile | null> => {
       try {
         const { error } = await withRetry(() => c.from(table).upsert(payload, { onConflict: "id" }));
@@ -305,6 +316,27 @@ export const db = {
         }
         return row;
       } catch (err) {
+        // 22P02 = invalid type (string into int, string into text[], etc).
+        // Retry once with legacy-compatible types (text[] for target_exam, int for exam_year).
+        if (isInvalidTypeError(err)) {
+          console.warn("[onboarding-save] 22P02 invalid type — retrying with legacy fallback payload", err);
+          const fallback = fallbackLegacyPayload(payload);
+          console.log(`[onboarding-save] fallback payload=${JSON.stringify(fallback)}`);
+          try {
+            const { error: fbError } = await c.from(table).upsert(fallback, { onConflict: "id" });
+            if (fbError) throw fbError;
+            // Keep payload in sync for outer retry/logging
+            payload = fallback;
+            const { data, error: verifyError2 } = await c.from(table).select("*").eq("id", userId).maybeSingle();
+            if (verifyError2) throw verifyError2;
+            const row2 = data as Profile | null;
+            if (row2 && row2.onboarding_completed === true) return row2;
+            return null;
+          } catch (fbErr) {
+            logSaveFailure("upsert-fallback", table, userId, sessionUser.id, fallback, fbErr);
+            throw fbErr;
+          }
+        }
         logSaveFailure("upsert", table, userId, sessionUser.id, payload, err);
         throw err;
       }
@@ -317,6 +349,8 @@ export const db = {
       if (row) return row;
     } catch (err) {
       console.warn("[onboarding-save] first attempt failed; retrying once", err);
+      // If first attempt was 22P02 and already retried via fallback, don't infinite loop;
+      // outer retry will use the (possibly mutated) payload.
     }
     try {
       const row = await persist();
@@ -358,32 +392,44 @@ export const db = {
         throw new Error("Your session has expired. Please sign in again.");
       }
 
-      const rows = items.map((b) => ({
-        title: buildBacklogTitle({
-          subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
-          pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
+      const rows = items.map((b) => {
+        const s = sanitizeBacklogRowInput(b);
+        const safeSubject = String(b.subject ?? "").trim();
+        const safeChapter = String(b.chapter ?? "").trim();
+        // Recompute title/progress from sanitized numbers to avoid NaN/null
+        const titleInput: BacklogDetailInput = {
+          subject: safeSubject,
+          chapter: safeChapter,
+          backlog_types: backlogTypesFor({ ...b, ...s } as OnboardingBacklog),
+          pending_lectures: s.pending_lectures,
+          pending_dpps: s.pending_dpps,
           module_progress: "not_started" as ModuleProgress,
-          module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
-        }),
-        subject: b.subject, chapter: b.chapter,
-        exam_id: examId ?? null,
-        priority: "high" as Priority, status: "todo" as const,
-        backlog_types: backlogTypesFor(b),
-        pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
-        module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
-        overall_progress: computeOverallProgress({
-          subject: b.subject, chapter: b.chapter, backlog_types: backlogTypesFor(b),
-          pending_lectures: b.pending_lectures, pending_dpps: b.pending_dpps,
-          module_progress: "not_started" as ModuleProgress,
-          module_total_questions: 100, module_solved_questions: clampModulePct(b.module_pct),
-        }, clampModulePct(b.module_pct)),
-        pending_pyqs: b.pending_pyqs, revision_pending: b.revision_pending,
-        // Onboarding v3 per-chapter detail (migration 20260805160000).
-        lecture_status: b.lecture_status || "not_started",
-        revision_level: b.revision_level ?? 0,
-        confidence: b.confidence ?? 3,
-        user_id: userId,
-      }));
+          module_total_questions: 100,
+          module_solved_questions: s.module_pct,
+        };
+        const progress = computeOverallProgress(titleInput, s.module_pct);
+        const safeProgress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
+        return {
+          title: buildBacklogTitle(titleInput),
+          subject: safeSubject,
+          chapter: safeChapter,
+          exam_id: examId ?? null,
+          priority: "high" as Priority,
+          status: "todo" as const,
+          backlog_types: backlogTypesFor({ ...b, ...s } as OnboardingBacklog),
+          pending_lectures: s.pending_lectures,
+          pending_dpps: s.pending_dpps,
+          module_total_questions: 100,
+          module_solved_questions: s.module_pct,
+          overall_progress: safeProgress,
+          pending_pyqs: s.pending_pyqs,
+          revision_pending: s.revision_pending,
+          lecture_status: s.lecture_status,
+          revision_level: s.revision_level,
+          confidence: s.confidence,
+          user_id: userId,
+        };
+      });
 
       // 8. Print the full payload before sending.
       console.log(`[onboarding-save] op=insert table=${table} user=${userId} sessionUser=${sessionUser.id} rows=${rows.length} payload=${JSON.stringify(rows)}`);
@@ -398,15 +444,51 @@ export const db = {
         throw probe.error;
       }
 
-      // 10. Insert with retry-once on network failure.
+      // 10. Insert with retry-once on network failure. Handles 22P02 via per-row fallback.
       try {
         const { error } = await withRetry(() => c.from(table).insert(rows));
-        if (error) {
-          logSaveFailure("insert", table, userId, sessionUser.id, rows, error);
-          throw error;
-        }
+        if (error) throw error;
       } catch (err) {
         if (isNetworkError(err)) throw err;
+        // Try per-row fallback (handles missing columns, generated columns and 22P02)
+        if (isInvalidTypeError(err) || missingColumnFromError(err) || (err as { code?: string })?.code === "428C9") {
+          console.warn("[db.addOnboardingBacklogs] bulk insert failed with type/missing column — retrying per-row with fallback", err);
+          for (const row of rows) {
+            try {
+              // Use resilient helper that strips missing/generated columns and retries
+              await insertBacklogWithFallback(c, row as Record<string, unknown>);
+            } catch (rowErr) {
+              if (isInvalidTypeError(rowErr)) {
+                console.warn("[db.addOnboardingBacklogs] row still invalid type, attempting minimal fallback", rowErr);
+                // Minimal fallback: strip overall_progress to 0 and ensure ints
+                const minimal: Record<string, unknown> = {
+                  title: row.title,
+                  subject: row.subject,
+                  chapter: row.chapter,
+                  exam_id: row.exam_id,
+                  priority: row.priority,
+                  status: row.status,
+                  user_id: row.user_id,
+                  backlog_types: row.backlog_types,
+                  pending_lectures: row.pending_lectures,
+                  pending_dpps: row.pending_dpps,
+                  module_total_questions: row.module_total_questions,
+                  module_solved_questions: row.module_solved_questions,
+                  overall_progress: 0,
+                  pending_pyqs: row.pending_pyqs,
+                  revision_pending: row.revision_pending,
+                  lecture_status: row.lecture_status,
+                  revision_level: row.revision_level,
+                  confidence: row.confidence,
+                };
+                await insertBacklogWithFallback(c, minimal);
+              } else {
+                throw rowErr;
+              }
+            }
+          }
+          return;
+        }
         logSaveFailure("insert", table, userId, sessionUser.id, rows, err);
         throw err;
       }
@@ -418,7 +500,20 @@ export const db = {
     try {
       const update: Record<string, unknown> = { ...patch, updated_at: new Date().toISOString() };
       if (patch.target_exam) update.target_exam = aliasExamId(patch.target_exam);
-      const { error } = await c.from("profiles").update(update).eq("id", userId);
+      // Sanitize exam_year if present (string vs int mismatch)
+      if (update.exam_year !== undefined && typeof update.exam_year === "string" && /^\d{4}$/.test(update.exam_year as string)) {
+        // keep as string for intended schema; fallback will convert to int on 22P02
+      }
+      let { error } = await c.from("profiles").update(update).eq("id", userId);
+      if (error && isInvalidTypeError(error)) {
+        console.warn("[db.updateAcademicSettings] 22P02 invalid type — retrying with legacy fallback", error);
+        const fallback: Record<string, unknown> = { ...update };
+        if (typeof fallback.target_exam === "string") fallback.target_exam = [fallback.target_exam as string];
+        if (typeof fallback.exam_year === "string" && /^\d{4}$/.test(fallback.exam_year as string)) fallback.exam_year = Number(fallback.exam_year);
+        const retry = await c.from("profiles").update(fallback).eq("id", userId);
+        if (retry.error) { logProfileSaveFailure("db.updateAcademicSettings-fallback", "profiles", fallback, retry.error); throw retry.error; }
+        return;
+      }
       if (error) { logProfileSaveFailure("db.updateAcademicSettings", "profiles", update, error); throw error; }
     } catch (err) { console.error("[db.updateAcademicSettings] threw", err); throw err; }
   },
@@ -498,6 +593,86 @@ export const db = {
       const { error } = await c.from("daily_plan_inputs").upsert(payload, { onConflict: "user_id,plan_date" });
       if (error) { console.error("[db.saveDailyPlanInputs]", error); throw error; }
     } catch (err) { console.error("[db.saveDailyPlanInputs] threw", err); throw err; }
+  },
+
+  async getAllDailyPlanInputs(): Promise<DailyPlanInputs[]> {
+    const c = assertClient();
+    try {
+      const { data, error } = await c.from("daily_plan_inputs").select("*").order("plan_date", { ascending: false });
+      if (error) console.error("[db.getAllDailyPlanInputs]", error);
+      return assertRows<DailyPlanInputs>(data, "getAllDailyPlanInputs");
+    } catch (err) { console.error("[db.getAllDailyPlanInputs] threw", err); return []; }
+  },
+
+  // Streak via plan generation: max 1 per day, only for today's plan. Handles gaps and first streak start.
+  async bumpStreakForPlanGeneration(date: string): Promise<{ newStreak: number; alreadyBumped: boolean }> {
+    const c = assertClient();
+    try {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      if (date !== todayStr) return { newStreak: 0, alreadyBumped: true }; // only today's plan counts
+      const sessionUser = await currentSessionUser();
+      if (!sessionUser) return { newStreak: 0, alreadyBumped: true };
+      // Guard duplicated bump same day via storage as fast path
+      const storageKey = `studyshield:streakBump:${sessionUser.id}:${todayStr}`;
+      try {
+        if (typeof window !== "undefined" && window.localStorage.getItem(storageKey) === "1") {
+          const stats = await this.getStudyStats().catch(() => null);
+          return { newStreak: stats?.streak_days ?? 0, alreadyBumped: true };
+        }
+      } catch { /* ignore storage */ }
+      // Check if daily_plan_inputs for today already existed BEFORE this generation
+      // Caller should have already inserted today's plan, but we need to know if this is first generation today.
+      // We use count of daily inputs for today: if 2nd generation today, we already bumped.
+      // We detect by checking if today's plan count was 1 before and now still 1 — we can't know.
+      // Instead we track last bump date in study_stats via updated_at comparison: if streak already bumped today, skip.
+      // We store last bump marker in localStorage after successful bump, and also check study_stats yesterday gap.
+      // To be device-independent, we also fetch all plan inputs to see if yesterday had activity.
+      const stats = await this.getStudyStats().catch(() => null);
+      const existingStreak = stats?.streak_days ?? 0;
+      // If we already have a plan for today before this call, check via daily inputs count for today vs stats bump
+      // Simpler: if stats updated_at is today and we already set storage, skip. But if new device, storage miss.
+      // Fetch all daily plans to compute correct streak including today
+      const allPlans = await this.getAllDailyPlanInputs().catch(() => [] as DailyPlanInputs[]);
+      const planDates = new Set(allPlans.map((p) => p.plan_date));
+      // Also union completed task dates
+      const tasks = await this.getAllTasks().catch(() => [] as PlanTask[]);
+      const taskDates = new Set(tasks.filter((t) => t.task_status === "completed" || t.completed).map((t) => t.scheduled_date).filter(Boolean) as string[]);
+      const allActive = new Set<string>([...planDates, ...taskDates]);
+      // Ensure today is in active (it should be after generation)
+      allActive.add(todayStr);
+      // Compute streak via same logic as computeCurrentStreak but with plan dates
+      let streak = 0;
+      const d = new Date(today);
+      for (let i = 0; i < 365; i++) {
+        if (i > 0) d.setDate(d.getDate() - 1);
+        const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0");
+        const ds = `${y}-${m}-${day}`;
+        if (allActive.has(ds)) streak++;
+        else if (i > 0) break;
+      }
+      // Max 1 per day: if existingStreak === streak then we already bumped (since streak includes today)
+      // Compare computed streak with existing persisted streak
+      if (existingStreak >= streak && existingStreak > 0) {
+        try { if (typeof window !== "undefined") window.localStorage.setItem(storageKey, "1"); } catch { /* ignore */ }
+        return { newStreak: existingStreak, alreadyBumped: true };
+      }
+      // Need to bump: persist new streak
+      const newStreak = streak || 1; // ensure at least 1 on first plan
+      await this.upsertStudyStats({ streak_days: newStreak }).catch(() => {});
+      // Sync longest
+      try {
+        const profile = await this.getProfile(sessionUser.id).catch(() => null);
+        if (profile && newStreak > (profile.longest_streak ?? 0)) {
+          await this.upsertProfile({ id: sessionUser.id, longest_streak: newStreak }).catch(() => {});
+        }
+      } catch { /* ignore */ }
+      try { if (typeof window !== "undefined") window.localStorage.setItem(storageKey, "1"); } catch { /* ignore */ }
+      return { newStreak, alreadyBumped: false };
+    } catch (err) {
+      console.error("[db.bumpStreakForPlanGeneration] threw", err);
+      return { newStreak: 0, alreadyBumped: true };
+    }
   },
 
   async getFocusSessions(): Promise<FocusSession[]> {
@@ -666,9 +841,15 @@ export const db = {
         const overallPct = resourceSummary(resources).pct;
         blPatch.overall_progress = overallPct;
         blPatch.status = overallPct >= 100 ? "done" : "todo";
+        // Add completed_at if the item is now done (resilient to missing column)
+        if (blPatch.status === "done") (blPatch as Record<string, unknown>).completed_at = new Date().toISOString();
+        else (blPatch as Record<string, unknown>).completed_at = null;
         for (const row of backlogRows) {
-          const { error } = await c.from("backlog_items").update({ ...blPatch, exam_id: row.exam_id }).eq("id", row.id);
-          if (error) { console.error("[db.saveChapterProgress] backlog update", error); throw error; }
+          const patchWithExam = { ...blPatch, exam_id: row.exam_id };
+          // Strip generated column if present in patch
+          delete (patchWithExam as Record<string, unknown>).module_questions_remaining;
+          const updated = await updateBacklogWithFallback(c, row.id, patchWithExam);
+          if (!updated) console.warn("[db.saveChapterProgress] backlog update returned null for", row.id);
         }
       } else if (hasContent) {
         const row = buildSmartBacklogRow({
@@ -685,8 +866,9 @@ export const db = {
             revision: { total: pendingRevision, completed: 0 },
           },
         });
-        const { error } = await c.from("backlog_items").insert(row);
-        if (error) { console.error("[db.saveChapterProgress] backlog insert", error); throw error; }
+        // Remove generated column if buildSmartBacklogRow included it via stripped fallback
+        delete (row as Record<string, unknown>).module_questions_remaining;
+        await insertBacklogWithFallback(c, row as Record<string, unknown>);
       }
     } catch (err) { console.error("[db.saveChapterProgress] threw", err); throw err; }
   },
@@ -713,10 +895,13 @@ export const db = {
         .update({ status: "completed", lectures_remaining: 0, questions_remaining: 0, revision_pending: 0, progress: { fullyCompleted: true }, updated_at: now })
         .eq("subject", subject).eq("chapter", chapter);
       if (e1) { console.error("[db.markChapterCompleted] user_chapters", e1); throw e1; }
-      const { error: e2 } = await c.from("backlog_items")
-        .update({ status: "done", overall_progress: 100, completed_at: now, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now })
-        .eq("subject", subject).eq("chapter", chapter);
-      if (e2) { console.error("[db.markChapterCompleted] backlog_items", e2); throw e2; }
+      // Resilient backlog update — handles missing completed_at/difficulty columns
+      const patch: Record<string, unknown> = { status: "done", overall_progress: 100, completed_at: now, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now };
+      // Apply to all rows for this chapter one-by-one with fallback
+      const { data: rows } = await c.from("backlog_items").select("id").eq("subject", subject).eq("chapter", chapter);
+      for (const r of (rows as { id: string }[] | null) ?? []) {
+        try { await updateBacklogWithFallback(c, r.id, patch); } catch (e2) { console.error("[db.markChapterCompleted] backlog_items", e2); throw e2; }
+      }
     } catch (err) { console.error("[db.markChapterCompleted] threw", err); throw err; }
   },
 
@@ -729,10 +914,11 @@ export const db = {
         .update({ status: "not_started", lectures_remaining: 0, questions_remaining: 0, revision_pending: 0, confidence: 3, progress: { notStarted: true }, updated_at: now })
         .eq("subject", subject).eq("chapter", chapter);
       if (e1) { console.error("[db.resetChapterProgress] user_chapters", e1); throw e1; }
-      const { error: e2 } = await c.from("backlog_items")
-        .update({ status: "todo", overall_progress: 0, completed_at: null, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now })
-        .eq("subject", subject).eq("chapter", chapter);
-      if (e2) { console.error("[db.resetChapterProgress] backlog_items", e2); throw e2; }
+      const patch2: Record<string, unknown> = { status: "todo", overall_progress: 0, completed_at: null, pending_lectures: 0, pending_dpps: 0, pending_pyqs: 0, revision_pending: 0, pending_tests: 0, updated_at: now };
+      const { data: rows2 } = await c.from("backlog_items").select("id").eq("subject", subject).eq("chapter", chapter);
+      for (const r of (rows2 as { id: string }[] | null) ?? []) {
+        try { await updateBacklogWithFallback(c, r.id, patch2); } catch (e2) { console.error("[db.resetChapterProgress] backlog_items", e2); throw e2; }
+      }
     } catch (err) { console.error("[db.resetChapterProgress] threw", err); throw err; }
   },
 
@@ -885,13 +1071,9 @@ export const db = {
   async addBacklogItem(row: { title: string; subject?: string | null; chapter?: string | null; priority: Priority }): Promise<BacklogItem> {
     const c = assertClient();
     try {
-      const { data, error } = await c.from("backlog_items").insert({
+      return await insertBacklogWithFallback(c, {
         title: row.title, subject: row.subject ?? null, chapter: row.chapter ?? null, priority: row.priority,
-      }).select("*").maybeSingle();
-      if (error) { console.error("[db.addBacklogItem]", error); throw error; }
-      const item = (data as BacklogItem) ?? null;
-      if (!item) throw new Error("Failed to create backlog item");
-      return item;
+      });
     } catch (err) { console.error("[db.addBacklogItem] threw", err); throw err; }
   },
 
@@ -899,24 +1081,22 @@ export const db = {
     const c = assertClient();
     try {
       const remaining = computeModuleRemaining(input.module_total_questions, input.module_solved_questions);
-      const { data, error } = await c.from("backlog_items").insert({
+      return await insertBacklogWithFallback(c, {
         title: buildBacklogTitle(input), subject: input.subject, chapter: input.chapter, priority,
         backlog_types: input.backlog_types, pending_lectures: input.pending_lectures, pending_dpps: input.pending_dpps,
         module_progress: input.module_progress, module_total_questions: input.module_total_questions,
         module_solved_questions: input.module_solved_questions, overall_progress: computeOverallProgress(input, remaining),
-      }).select("*").maybeSingle();
-      if (error) { console.error("[db.addBacklogDetail]", error); throw error; }
-      const item = (data as BacklogItem) ?? null;
-      if (!item) throw new Error("Failed to create backlog item");
-      return item;
+      });
     } catch (err) { console.error("[db.addBacklogDetail] threw", err); throw err; }
   },
 
   async updateBacklogItem(id: string, patch: Partial<BacklogItem>): Promise<void> {
     const c = assertClient();
     try {
-      const { error } = await c.from("backlog_items").update(patch).eq("id", id);
-      if (error) { console.error("[db.updateBacklogItem]", error); throw error; }
+      // Use fallback helper to handle missing columns gracefully
+      const sanitized = { ...(patch as Record<string, unknown>) };
+      delete sanitized.module_questions_remaining;
+      await updateBacklogWithFallback(c, id, sanitized);
     } catch (err) { console.error("[db.updateBacklogItem] threw", err); throw err; }
   },
 
@@ -937,9 +1117,8 @@ export const db = {
         if (remaining === 0 && (item.module_total_questions ?? 0) > 0) patch.module_progress = "completed" as ModuleProgress;
         else if (solved > 0 && (item.module_progress ?? "not_started") === "not_started") patch.module_progress = "in_progress" as ModuleProgress;
       }
-      const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
-      if (error) { console.error("[db.decrementBacklog] update", error); throw error; }
-      return (data as BacklogItem) ?? null;
+      const updated = await updateBacklogWithFallback(c, id, patch as Record<string, unknown>);
+      return updated;
     } catch (err) { console.error("[db.decrementBacklog] threw", err); return null; }
   },
 
@@ -956,10 +1135,7 @@ export const db = {
     const c = assertClient();
     try {
       const row = buildSmartBacklogRow(input);
-      const { data, error } = await c.from("backlog_items").insert(row).select("*").maybeSingle();
-      if (error) { console.error("[db.addSmartBacklog]", error); throw error; }
-      const item = (data as BacklogItem) ?? null;
-      if (!item) throw new Error("Failed to create backlog item");
+      const item = await insertBacklogWithFallback(c, row);
       // Award XP for adding a backlog (10 XP)
       void this.incrementXP(10).catch(() => { /* ignore */ });
       return item;
@@ -970,9 +1146,7 @@ export const db = {
     const c = assertClient();
     try {
       const row = buildSmartBacklogRow(input);
-      const { data, error } = await c.from("backlog_items").update(row).eq("id", id).select("*").maybeSingle();
-      if (error) { console.error("[db.updateSmartBacklog]", error); throw error; }
-      return (data as BacklogItem) ?? null;
+      return await updateBacklogWithFallback(c, id, row);
     } catch (err) { console.error("[db.updateSmartBacklog] threw", err); throw err; }
   },
 
@@ -987,17 +1161,18 @@ export const db = {
       const res = extractBacklogResources(item);
       const cur = res[kind] ?? { total: 0, completed: 0 };
       res[kind] = { total: cur.total, completed: Math.max(0, Math.min(cur.total, completed)) };
-      const patch = syncBacklogColumns(res);
+      const patch = syncBacklogColumns(res) as Record<string, unknown>;
       patch.backlog_data = { ...(item.backlog_data ?? {}), resources: res as Record<string, unknown> };
       const summary = resourceSummary(res);
       patch.overall_progress = summary.pct;
       patch.status = summary.total > 0 && summary.remaining === 0 ? "done" : "todo";
       patch.completed_at = patch.status === "done" ? new Date().toISOString() : null;
-      const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
-      if (error) { console.error("[db.updateBacklogResourceProgress] update", error); throw error; }
-      if (patch.status === "done") void this.incrementXP(20).catch(() => { /* ignore */ });
-      else void this.incrementXP(5).catch(() => { /* ignore */ });
-      return (data as BacklogItem) ?? null;
+      const updated = await updateBacklogWithFallback(c, id, patch);
+      if (updated) {
+        if (patch.status === "done") void this.incrementXP(20).catch(() => { /* ignore */ });
+        else void this.incrementXP(5).catch(() => { /* ignore */ });
+      }
+      return updated;
     } catch (err) { console.error("[db.updateBacklogResourceProgress] threw", err); throw err; }
   },
 
@@ -1010,15 +1185,14 @@ export const db = {
       const item = existing as BacklogItem | null;
       if (!item) return null;
       const summary = resourceSummary(extractBacklogResources(item));
-      const patch: Partial<BacklogItem> = {
+      const patch: Record<string, unknown> = {
         status: done ? "done" : "todo",
         completed_at: done ? new Date().toISOString() : null,
         overall_progress: done ? 100 : summary.pct,
       };
-      const { data, error } = await c.from("backlog_items").update(patch).eq("id", id).select("*").maybeSingle();
-      if (error) { console.error("[db.completeBacklogItem] update", error); throw error; }
-      if (done) void this.incrementXP(50).catch(() => { /* ignore */ });
-      return (data as BacklogItem) ?? null;
+      const updated = await updateBacklogWithFallback(c, id, patch);
+      if (updated && done) void this.incrementXP(50).catch(() => { /* ignore */ });
+      return updated;
     } catch (err) { console.error("[db.completeBacklogItem] threw", err); throw err; }
   },
 
@@ -1108,9 +1282,14 @@ export const db = {
   async getRecentCompletedTasks(days: number): Promise<PlanTask[]> {
     try {
       const c = assertClient();
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+      // Use local date for cutoff to match computeCurrentStreak (UTC slice is off by 1 for IST)
+      const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - days);
+      const y = cutoff.getFullYear();
+      const m = String(cutoff.getMonth() + 1).padStart(2, "0");
+      const d = String(cutoff.getDate()).padStart(2, "0");
+      const cutoffStr = `${y}-${m}-${d}`;
       const { data, error } = await c.from("plan_tasks").select("*")
-        .eq("task_status", "completed").gte("scheduled_date", cutoff.toISOString().slice(0, 10))
+        .eq("task_status", "completed").gte("scheduled_date", cutoffStr)
         .order("scheduled_date", { ascending: false });
       if (error) throw error;
       return (data ?? []) as PlanTask[];
@@ -1146,7 +1325,7 @@ export const db = {
     if (error) throw error;
   },
 
-  // --- AI Mentor daily check-ins ---
+  // --- Echo daily check-ins ---
   async getDailyCheckin(date: string): Promise<MentorDailyCheckin | null> {
     try {
       const c = assertClient();
@@ -1241,7 +1420,9 @@ export function buildSmartBacklogRow(input: SmartBacklogInput): Record<string, u
     ...syncBacklogColumns(res),
   };
   row.status = summary.total > 0 && summary.remaining === 0 ? "done" : "todo";
-  row.completed_at = row.status === "done" ? new Date().toISOString() : null;
+  // Only send completed_at when the row is done — avoids a PGRST204 retry on
+  // DBs that haven't yet applied 20260907120000 (todo rows have null anyway).
+  if (row.status === "done") row.completed_at = new Date().toISOString();
   return row;
 }
 

@@ -96,7 +96,7 @@ export interface MarkdownProps {
 }
 
 /**
- * Renders AI mentor responses as polished Markdown + LaTeX.
+ * Renders Echo responses as polished Markdown + LaTeX.
  *
  * - `remark-gfm` — tables, task lists, strikethrough, autolinks.
  * - `remark-math` + `rehype-katex` — `$...$` inline and `$$...$$` display

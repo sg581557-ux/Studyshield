@@ -28,7 +28,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const EMAIL_FROM = "StudyShield <hello@studyshield.study>";
+const EMAIL_FROM = "StudyShield <studyshieldofficial@gmail.com>";
 const DEFAULT_SUBJECT = "Welcome to StudyShield";
 const RESEND_API_URL = "https://api.resend.com/emails";
 

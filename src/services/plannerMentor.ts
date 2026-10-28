@@ -1,4 +1,4 @@
-// AI Mentor → AI Planner execution layer.
+// Echo → AI Planner execution layer.
 //
 // The mentor-chat edge function decides WHEN a plan change is justified and
 // returns a validated, minimal change proposal (`PlannerChange`). This module
@@ -81,8 +81,13 @@ async function snapshotDate(date: string): Promise<{ tasks: PlanTask[]; inputs: 
 }
 
 async function capacityMinutes(date: string, profile: Profile | null, existing?: DailyPlanInputs | null): Promise<number> {
-  const hours = existing?.study_hours ?? (profile ? selectedHoursFor(profile, new Date(`${date}T00:00:00`)) : 0) ?? 0;
-  return Math.round(hours * 60 * DAY_TOLERANCE);
+  // Fallback to 4h when profile not loaded yet (e.g., first mentor chat before AI Planner generated)
+  // This ensures add_task still works instead of failing with "already full (0h capacity)"
+  const fallbackHours = profile?.daily_goal_hours && profile.daily_goal_hours > 0 ? profile.daily_goal_hours : 4;
+  const profileHours = profile ? selectedHoursFor(profile, new Date(`${date}T00:00:00`)) : null;
+  const hours = existing?.study_hours ?? profileHours ?? fallbackHours ?? 4;
+  const safeHours = Number.isFinite(hours) && hours > 0 ? hours : 4;
+  return Math.round(safeHours * 60 * DAY_TOLERANCE);
 }
 
 async function markChangeStatus(id: string, status: "applied" | "rejected" | "undone"): Promise<void> {
@@ -191,7 +196,11 @@ async function addTask(op: PlannerChangeOp, profile: Profile | null, snapshot: P
 
   const cap = await capacityMinutes(op.date, profile, existing);
   const currentMin = tasks.reduce((s, t) => s + (t.estimated_minutes ?? 0), 0);
-  if (currentMin + minutes > cap) {
+  // For exam-related tasks (high priority, title contains exam/half yearly), allow a more generous cap
+  // so the user's exam prep is never blocked by "already full"
+  const isExamTask = /exam|half yearly|half-yearly|mid term|midterm/i.test(op.title ?? "") && (op.priority === "high" || op.priority === "critical");
+  const effectiveCap = isExamTask ? cap + 90 : cap;
+  if (currentMin + minutes > effectiveCap) {
     return { ok: false, error: `Day ${fmtDate(op.date)} is already full (${Math.round(currentMin / 60)}h planned vs ${Math.round(cap / 60)}h capacity).` };
   }
 

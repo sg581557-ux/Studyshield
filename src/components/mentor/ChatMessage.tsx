@@ -1,11 +1,12 @@
 import { memo, useMemo } from "react";
 import {
-  Copy, Image as ImageIcon, RotateCcw, Share2, ShieldCheck, ThumbsDown, ThumbsUp, Volume2, VolumeX,
+  Copy, Image as ImageIcon, RotateCcw, Share2, ThumbsDown, ThumbsUp, Volume2, VolumeX,
 } from "lucide-react";
 import { Markdown } from "../Markdown";
 import { getSessionImage, splitImageMarkers } from "../../lib/imageUtils";
 import { cn } from "../../lib/utils";
 import type { MentorChatMessage } from "../../services/mentor";
+import { EchoAvatar } from "./EchoAvatar";
 
 export type MessageFeedback = "like" | "dislike";
 
@@ -56,13 +57,16 @@ function MessageContent({ content, onOpenImage }: { content: string; onOpenImage
 
 export function TypingDots({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="flex gap-1">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400 [animation-delay:120ms]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400 [animation-delay:240ms]" />
+    <div className="flex items-center gap-3">
+      <span className="relative flex h-7 w-7 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-accent-500/20 animate-pulse" />
+        <span className="relative flex gap-1">
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-400 [animation-delay:120ms]" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400 [animation-delay:240ms]" />
+        </span>
       </span>
-      <span className="text-xs text-slate-400">{label}</span>
+      <span className="text-[13px] font-medium tracking-wide text-slate-200 animate-pulse">{label}</span>
     </div>
   );
 }
@@ -82,8 +86,8 @@ function ActionButton({
       aria-label={title}
       onClick={onClick}
       className={cn(
-        "flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-200",
-        active && "text-accent-400 hover:text-accent-400",
+        "flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-zinc-500 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white hover:scale-105 active:scale-95",
+        active && "border-accent-500/30 bg-accent-500/15 text-accent-400 hover:border-accent-500/40 hover:text-accent-300",
       )}
     >
       {children}
@@ -115,11 +119,15 @@ export const ChatMessage = memo(function ChatMessage({
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="flex min-w-0 max-w-[85%] flex-col items-end md:max-w-[75%]">
-          <div className="chat-user rounded-2xl rounded-tr-md bg-accent-600 px-4 py-2.5 text-white md:px-5 md:py-3">
-            <MessageContent content={msg.content} onOpenImage={onOpenImage} />
+        <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1 sm:gap-1.5 md:max-w-[74%]">
+          <div className="group relative overflow-hidden rounded-[18px] sm:rounded-[20px] rounded-br-md bg-gradient-to-br from-accent-600 via-accent-600 to-violet-600 px-3 sm:px-4 py-2.5 sm:py-3 text-white shadow-[0_8px_24px_rgba(29,150,245,0.22),0_1px_0_rgba(255,255,255,0.15)_inset] md:px-5 md:py-3.5">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.12] via-transparent to-transparent pointer-events-none" />
+            <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+            <div className="relative">
+              <MessageContent content={msg.content} onOpenImage={onOpenImage} />
+            </div>
           </div>
-          {time && <span className="mt-1 text-[10px] text-slate-500">{time}</span>}
+          {time && <span className="mr-1 text-[10px] font-medium tracking-wide text-zinc-500">{time}</span>}
         </div>
       </div>
     );
@@ -127,18 +135,25 @@ export const ChatMessage = memo(function ChatMessage({
 
   return (
     <div className="group flex justify-start">
-      <div className="flex min-w-0 max-w-full flex-col items-start md:max-w-[80%]">
-        <div className="flex w-full gap-2.5 md:gap-3">
-          <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent-600/20">
-            <ShieldCheck className="h-4 w-4 text-accent-400" />
+      <div className="flex min-w-0 max-w-full flex-col items-start gap-1 sm:gap-1.5 md:max-w-[82%]">
+        <div className="flex w-full gap-2 sm:gap-3">
+          <div className="mt-0.5 shrink-0 hidden sm:block">
+            <EchoAvatar variant="message" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className={cn("rounded-2xl rounded-tl-md border border-white/5 bg-ink-800 px-4 py-3 text-slate-200 md:px-5 md:py-4", streaming && "chat-caret")}>
-              <MessageContent content={msg.content} onOpenImage={onOpenImage} />
+            <div className={cn(
+              "relative overflow-hidden rounded-[18px] sm:rounded-[20px] rounded-tl-md border border-white/[0.06] bg-[#0f0f10]/80 backdrop-blur-xl px-3 sm:px-4 py-3 sm:py-3.5 text-[14px] sm:text-[15px] leading-6 sm:leading-7 text-slate-200 shadow-[0_8px_32px_rgba(0,0,0,0.24),0_1px_0_rgba(255,255,255,0.04)_inset] md:px-5 md:py-4",
+              streaming && "chat-caret"
+            )}>
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent pointer-events-none" />
+              <div className="absolute -left-12 -top-12 h-24 w-24 rounded-full bg-gradient-to-br from-accent-500/10 to-violet-500/10 blur-2xl pointer-events-none" />
+              <div className="relative">
+                <MessageContent content={msg.content} onOpenImage={onOpenImage} />
+              </div>
             </div>
-            {time && <span className="mt-1 block text-[10px] text-slate-500">{time}</span>}
+            {time && <span className="ml-1 mt-1 block text-[10px] font-medium tracking-wide text-zinc-500">{time}</span>}
             {!streaming && (
-              <div className="mt-1 flex items-center gap-0.5 transition-opacity md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+              <div className="mt-2 flex flex-wrap items-center gap-1 rounded-full border border-white/[0.04] bg-white/[0.02] px-1 py-1 backdrop-blur w-fit transition-all md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
                 <ActionButton title="Copy" onClick={() => onCopy(msg.content)}>
                   <Copy className="h-3.5 w-3.5" />
                 </ActionButton>
@@ -148,6 +163,7 @@ export const ChatMessage = memo(function ChatMessage({
                 <ActionButton title={speaking ? "Stop reading" : "Read aloud"} active={speaking} onClick={() => onReadAloud(index, msg.content)}>
                   {speaking ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
                 </ActionButton>
+                <span className="mx-1 h-4 w-px bg-white/10" />
                 <ActionButton title="Like" active={feedback === "like"} onClick={() => onFeedback(index, "like")}>
                   <ThumbsUp className="h-3.5 w-3.5" />
                 </ActionButton>

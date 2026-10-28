@@ -271,7 +271,7 @@ function buildCoaching(profile: Profile, date: string): PlannedTask[] {
   const wdLong = dateObj.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
   const name = profile.coaching_name || "Online class";
   const schedule = Array.isArray(profile.class_schedule) ? profile.class_schedule : [];
-  if (profile.class_mode === "live" && schedule.length > 0) {
+  if ((profile.class_mode === "live" || profile.class_mode === "online") && schedule.length > 0) {
     const tasks: PlannedTask[] = [];
     for (const b of schedule) {
       if (!b || b.day !== wdLong || !b.start || !b.end || b.start >= b.end) continue;
@@ -289,16 +289,16 @@ function buildCoaching(profile: Profile, date: string): PlannedTask[] {
   return [{ title: `Coaching: ${name}`, subject: null, type: "coaching", estimated_minutes: Math.max(30, (eh * 60 + em) - (sh * 60 + sm)), priority: "high", chapter: null, source: "coaching", priority_score: 10, tracker_ref: { class_start: profile.coaching_start ?? "16:00", class_end: profile.coaching_end ?? "19:00" }, reason: "Today's coaching — the plan is built around what is being taught right now." }];
 }
 
-// School hours for the given date (onboarding v3: school_days + timings).
-// Pinned like live classes — study tasks are never placed inside these hours.
+// School hours for the given date — hardcoded 07:00–14:00 when school day is selected.
+// The AI Planner assumes 7 AM – 2 PM for any chosen school day and never plans study during it.
 function buildSchool(profile: Profile, date: string): PlannedTask | null {
   const days = Array.isArray(profile.school_days) ? profile.school_days : [];
   if (days.length === 0) return null;
   const dateObj = new Date(date + "T00:00:00");
   const wdLong = dateObj.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
   if (!days.includes(wdLong)) return null;
-  const start = profile.school_start ?? "07:00";
-  const end = profile.school_end ?? "14:00";
+  const start = "07:00";
+  const end = "14:00";
   if (!start || !end || start >= end) return null;
   const mins = Math.max(30, (toMin(end) ?? 0) - (toMin(start) ?? 0));
   return {
@@ -845,10 +845,9 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
     night: { from: 20, to: 22 },
     night_owl: { from: 22, to: 24 },
   };
-  let wakeHour = profile.wake_up_time ? Number(profile.wake_up_time.slice(0, 2)) : 7;
-  let sleepHour = profile.sleep_time ? Number(profile.sleep_time.slice(0, 2)) : 23;
-  if (!Number.isFinite(wakeHour)) wakeHour = 7;
-  if (!Number.isFinite(sleepHour)) sleepHour = 23;
+  // Wake/sleep window is now hardcoded — planner assumes 06:00 wake, 23:00 sleep.
+  let wakeHour = 6;
+  let sleepHour = 23;
   if (sleepHour < wakeHour) sleepHour = 24;
   const availableSlotOrder = slotOrderFor(profile, habitStats).filter(
     (id) => Math.max(wakeHour, slotDefs[id].from) < Math.min(sleepHour, slotDefs[id].to),

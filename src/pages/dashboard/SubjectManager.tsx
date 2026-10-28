@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { BookMarked, Loader2, Save } from "lucide-react";
+import { BookMarked, Save } from "lucide-react";
+import { CrazyGridSkeleton } from "../../components/loaders/AestheticLoader";
 import { useAuth } from "../../context/AuthContext";
 import { db } from "../../services/db";
 import { Card, CardBody, EmptyState } from "../../components/ui";
 import { CHAPTER_STATUS_OPTIONS, CHAPTER_STATUS_LABELS } from "../../lib/constants";
+import { getSubjectsForExam } from "../../lib/examData";
+import { subjectsForExam as backlogSubjectsForExam, chaptersFor as backlogChaptersFor } from "../../lib/backlogMeta";
 import type { ChapterStatus, Priority, SyllabusSubject, UserChapter } from "../../lib/types";
 
 // Statuses that carry pending work counts the planner consumes.
@@ -72,7 +75,35 @@ export default function SubjectManager() {
     let cancelled = false;
     (async () => {
       try {
-        const subs = await db.getSubjects(target);
+        let subs = await db.getSubjects(target);
+        // Fallback to local EXAM_DATA when DB has no syllabus yet (supports all streams/classes offline)
+        if (subs.length === 0) {
+          let localSubjects = getSubjectsForExam(target);
+          let normalized: { name: string; chapters: string[] }[] | null = null;
+          if (localSubjects.length > 0) {
+            normalized = localSubjects;
+          } else {
+            const names = backlogSubjectsForExam(target);
+            if (names.length > 0) {
+              normalized = names.map((name) => ({ name, chapters: backlogChaptersFor(target, name) }));
+            }
+          }
+          if (normalized && normalized.length > 0) {
+            subs = normalized.map((s, i) => ({ id: `local-${s.name}-${i}`, name: s.name, exam_id: target, display_order: i } as unknown as SyllabusSubject));
+            const map: Record<string, { id: string; name: string }[]> = {};
+            for (let idx = 0; idx < normalized.length; idx++) {
+              const s = normalized[idx];
+              const sid = `local-${s.name}-${idx}`;
+              map[sid] = s.chapters.map((ch, cIdx) => ({ id: `${sid}-${cIdx}`, name: ch }));
+            }
+            if (cancelled) return;
+            setSubjects(subs);
+            setChapters(map);
+            setUcs(await db.getUserChapters());
+            if (subs[0]) setActiveSubject(subs[0].id);
+            return;
+          }
+        }
         if (cancelled) return;
         setSubjects(subs);
         const map: Record<string, { id: string; name: string }[]> = {};
@@ -129,8 +160,8 @@ export default function SubjectManager() {
 
   return (
     <div className="space-y-5">
-      <div><h1 className="text-xl font-semibold text-white flex items-center gap-2"><BookMarked className="w-5 h-5 text-accent-400" /> Subjects</h1><p className="text-sm text-slate-500 mt-0.5">Mark chapters in progress or backlog — the AI planner schedules lectures, modules, DPPs and PYQs from what you set.</p></div>
-      {loading ? <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 text-accent-500 animate-spin" /></div> :
+      <div><h1 className="text-xl font-semibold text-white flex items-center gap-2"><BookMarked className="w-5 h-5 text-accent-400" /> Chapter Tracker</h1><p className="text-sm text-slate-500 mt-0.5">Mark chapters in progress or backlog — the AI planner schedules lectures, modules, DPPs and PYQs from what you set.</p></div>
+      {loading ? <CrazyGridSkeleton count={8} /> :
        subjects.length === 0 ? <EmptyState icon={<BookMarked className="w-8 h-8" />} title="No syllabus" description="Set a target exam in settings to load your syllabus." /> : (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="space-y-1">

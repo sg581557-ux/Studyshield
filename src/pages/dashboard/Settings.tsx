@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Settings as SettingsIcon, Save, Sun, Moon, Monitor, GraduationCap } from "lucide-react";
+import { Settings as SettingsIcon, Save, GraduationCap } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-import { useTheme, type Theme } from "../../context/ThemeContext";
 import { db } from "../../services/db";
 import { Card, CardBody, Button } from "../../components/ui";
 import { STUDY_MODES } from "../../lib/constants";
@@ -11,34 +10,28 @@ import { examCategories, getExamsByCategory, getExamById } from "../../data/exam
 import { cn } from "../../lib/utils";
 import type { StudyMode } from "../../lib/types";
 
-const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun; desc: string }[] = [
-  { value: "light", label: "Light", icon: Sun, desc: "Bright daytime theme" },
-  { value: "dark", label: "Dark", icon: Moon, desc: "Easy on the eyes" },
-  { value: "system", label: "System", icon: Monitor, desc: "Follow OS setting" },
-];
-
 export default function Settings() {
   const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
-  const { theme, setTheme } = useTheme();
   const [fullName, setFullName] = useState(profile?.full_name ?? "");
   const [dailyHours, setDailyHours] = useState(profile?.daily_goal_hours ?? 6);
   const [studyMode, setStudyMode] = useState<StudyMode>((profile?.study_mode as StudyMode) ?? "balanced");
   const [targetExam, setTargetExam] = useState(profile?.target_exam ?? "");
   const [saving, setSaving] = useState(false);
 
-  // Keep local state in sync when the profile (e.g. after onboarding) loads.
-  // Render-phase adjustment keyed on the profile fields it mirrors — the form
-  // resets in the same commit the profile lands, without an effect cascade.
+  // Keep local state in sync when the profile loads. Use effect instead of
+  // render-phase setState to avoid StrictMode double commits (3-4x refresh).
   const profileKey = `${profile?.id ?? ""}|${profile?.full_name ?? ""}|${profile?.daily_goal_hours ?? ""}|${profile?.study_mode ?? ""}|${profile?.target_exam ?? ""}`;
-  const [prevProfileKey, setPrevProfileKey] = useState(profileKey);
-  if (prevProfileKey !== profileKey) {
-    setPrevProfileKey(profileKey);
-    setFullName(profile?.full_name ?? "");
-    setDailyHours(profile?.daily_goal_hours ?? 6);
-    setStudyMode((profile?.study_mode as StudyMode) ?? "balanced");
-    setTargetExam(profile?.target_exam ?? "");
-  }
+  const prevProfileKeyRef = useRef(profileKey);
+  useEffect(() => {
+    if (prevProfileKeyRef.current !== profileKey) {
+      prevProfileKeyRef.current = profileKey;
+      setFullName(profile?.full_name ?? "");
+      setDailyHours(profile?.daily_goal_hours ?? 6);
+      setStudyMode((profile?.study_mode as StudyMode) ?? "balanced");
+      setTargetExam(profile?.target_exam ?? "");
+    }
+  }, [profileKey, profile]);
 
   async function save() {
     if (!profile) return;
@@ -85,36 +78,6 @@ export default function Settings() {
         </span>
         <span className="text-slate-500 text-sm">Open →</span>
       </Link>
-
-      {/* Appearance — theme */}
-      <Card>
-        <CardBody className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Appearance</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Choose how StudyShield looks. Your choice is saved and stays after refresh.</p>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {THEME_OPTIONS.map((opt) => {
-              const active = theme === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setTheme(opt.value)}
-                  className={cn(
-                    "rounded-xl px-3 py-3 text-left transition-all border",
-                    active ? "border-accent-500 bg-accent-600/10" : "border-white/10 bg-white/5 hover:border-white/20",
-                  )}
-                >
-                  <opt.icon className={cn("w-5 h-5 mb-2", active ? "text-accent-400" : "text-slate-400")} />
-                  <div className="text-sm font-medium text-white">{opt.label}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">{opt.desc}</div>
-                </button>
-              );
-            })}
-          </div>
-        </CardBody>
-      </Card>
 
       {/* Profile & study preferences */}
       <Card>

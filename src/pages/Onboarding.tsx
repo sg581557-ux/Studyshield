@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShieldCheck, User, Calendar, School, TrendingUp, Mic2,
-  Clock, AlarmClock, Sunrise, BookOpen, ListTodo, Target, Languages,
+  AlarmClock, Sunrise, BookOpen, ListTodo, Target, Languages,
   ChevronRight, ChevronLeft, Check, Plus, X, Building2, PlayCircle,
   CalendarClock, Layers, Flag, Sparkles, MessageSquare,
 } from "lucide-react";
@@ -16,12 +16,12 @@ import { friendlySaveError } from "../lib/authErrors";
 import {
   CURRENT_LEVELS, PRIMARY_GOALS,
   PREFERRED_LANGUAGES, MENTOR_TONES, SUBJECTS_BY_EXAM, ONBOARDING_STEP_COUNT,
-  STUDY_TIME_BUCKETS, SESSION_LENGTHS, BREAK_OPTIONS, DAYS_OFF_OPTIONS,
-  PRODUCTIVE_SLOTS, weekdayStudyHours, HOW_STUDY_OPTIONS, COACHING_NAME_OPTIONS,
-  CLASS_MODE_OPTIONS, LECTURE_DURATION_OPTIONS, PREFERRED_STUDY_TIMES,
+  SESSION_LENGTHS, BREAK_OPTIONS, DAYS_OFF_OPTIONS,
+  PRODUCTIVE_SLOTS, HOW_STUDY_OPTIONS, COACHING_NAME_OPTIONS,
+  CLASS_MODE_OPTIONS, PREFERRED_STUDY_TIMES,
   examIdForOnboarding, STREAMS, STREAM_SUBJECTS, SCHOOL_CLASSES, SCHOOL_BOARDS,
-  ACADEMIC_GOALS, primaryExamFromGoals, SLEEP_GOAL_OPTIONS,
-  TESTS_PER_WEEK_OPTIONS, STUDY_DAYS_OPTIONS, chaptersForSubject, streamSubjects,
+  ACADEMIC_GOALS, primaryExamFromGoals, subjectsForGoals, SLEEP_GOAL_OPTIONS,
+  TESTS_PER_WEEK_OPTIONS, chaptersForSubject, streamSubjects,
   SLOT_LABELS,
 } from "../lib/onboarding";
 import { aliasExamId } from "../services/db";
@@ -29,8 +29,8 @@ import type { OnboardingInput, OnboardingBacklog, ClassScheduleEntry } from "../
 
 const STEP_TITLES = [
   "Basic Details", "Stream", "Academic Goals", "Target Year", "School / College", "Current Level",
-  "How do you study?", "Coaching", "Class Mode", "Classes & Schedule", "Daily Study Time",
-  "Routine & Sleep", "Productive Time", "Subjects", "Backlog", "Weekly Tests", "Goals", "AI Preferences",
+  "How do you study?", "Coaching", "How do you prefer to take classes?", "Classes & Schedule",
+  "Routine & Focus", "Productive Time", "Subjects", "Backlog", "Weekly Tests", "Goals", "AI Preferences",
 ];
 
 const emptyBacklog: OnboardingBacklog = {
@@ -44,7 +44,7 @@ function defaultForm(): OnboardingInput {
     full_name: "", age: "", school_class: "", target_exam: "", target_exam_other: "",
     exam_year: String(new Date().getFullYear() + 1), school_name: "", current_level: "",
     coaching: "none", coaching_other: "", coaching_type: "online", coaching_name: "",
-    class_mode: "", class_schedule: [], lecture_duration: 60, lectures_per_day: 2,
+    class_mode: "", class_schedule: [], lecture_duration: 120, lectures_per_day: 2,
     preferred_study_time: "",
     daily_goal_hours: 6, wake_up_time: "06:00",
     sleep_time: "22:30", subjects: [], has_backlog: false, backlogs: [],
@@ -87,6 +87,11 @@ export default function Onboarding() {
     const saved = profile?.onboarding_step ?? 0;
     let s = saved > 0 && saved < ONBOARDING_STEP_COUNT ? saved : 0;
     if (s >= ONBOARDING_STEP_COUNT) s = ONBOARDING_STEP_COUNT - 1;
+    // Migrated: old Daily Study Time (index 10) was removed — shift saved steps >10 down by 1.
+    if (saved > 10 && saved < 18) {
+      const shifted = saved - 1;
+      if (shifted >= 0 && shifted < ONBOARDING_STEP_COUNT) s = Math.min(shifted, ONBOARDING_STEP_COUNT - 1);
+    }
     // Guard: a stale saved step landing on a step hidden by self-study.
     const savedData = profile?.onboarding_data as Partial<OnboardingInput> | undefined;
     if (savedData?.coaching_type === "self_study" && (s === 7 || s === 8 || s === 9)) s = 10;
@@ -124,10 +129,11 @@ export default function Onboarding() {
     () => (derivedExam ? SUBJECTS_BY_EXAM[derivedExam] ?? SUBJECTS_BY_EXAM.Other : []),
     [derivedExam],
   );
-  // v3: subjects auto-load from the stream; exam-based list is the fallback.
+  // v3: show union of stream + every selected goal's exam subjects so no stream/class
+  // is locked to PCM only. Example: commerce + UPSC → Accountancy… + History…
   const subjectOptions = useMemo(
-    () => (form.stream ? streamSubjects(form.stream) : examSubjects),
-    [form.stream, examSubjects],
+    () => subjectsForGoals(form.stream, form.academic_goals, form.target_exam_other, derivedExam),
+    [form.stream, form.academic_goals, form.target_exam_other, derivedExam],
   );
 
   // Prefetch the DB syllabus chapters for the selected subject. The fetch is
@@ -169,16 +175,15 @@ export default function Onboarding() {
       case 8: return form.class_mode.trim().length > 0;
       case 9:
         if (form.class_mode === "live") return form.class_schedule.length > 0;
-        if (form.class_mode === "recorded") return form.lecture_duration > 0 && form.lectures_per_day > 0 && form.preferred_study_time !== "";
+        if (form.class_mode === "recorded") return form.lectures_per_day > 0 && form.preferred_study_time !== "";
         return true;
-      case 10: return form.weekday_study_hours.trim().length > 0 && (form.weekday_study_hours !== "custom" || form.custom_weekday_hours >= 1);
-      case 11: return !!form.wake_up_time && !!form.sleep_time && form.desired_sleep_hours > 0 && form.session_length_min > 0 && form.break_min > 0;
-      case 12: return form.productive_time.trim().length > 0;
-      case 13: return form.subjects.length > 0;
-      case 14: return !form.has_backlog || form.backlogs.length > 0;
-      case 15: return true;
-      case 16: return form.primary_goal.trim().length > 0 && (form.primary_goal !== "custom" || form.custom_goal.trim().length > 0);
-      case 17: return true;
+      case 10: return form.desired_sleep_hours > 0 && form.session_length_min > 0 && form.break_min > 0;
+      case 11: return form.productive_time.trim().length > 0;
+      case 12: return form.subjects.length > 0;
+      case 13: return !form.has_backlog || form.backlogs.length > 0;
+      case 14: return true;
+      case 15: return form.primary_goal.trim().length > 0 && (form.primary_goal !== "custom" || form.custom_goal.trim().length > 0);
+      case 16: return true;
       default: return true;
     }
   }
@@ -273,16 +278,34 @@ export default function Onboarding() {
 
   async function finish() {
     if (!user) return;
+    // Client-side preflight: catch obvious type issues before hitting the DB.
+    // The sanitizer in db.completeOnboarding also fixes these, but early feedback is clearer.
+    const preflight: string[] = [];
+    if (!form.full_name.trim()) preflight.push("Full name is required");
+    if (form.age.trim() && (!Number.isFinite(Number(form.age)) || Number(form.age) < 3 || Number(form.age) > 100)) preflight.push("Age must be between 3 and 100");
+    if (form.exam_year.trim() && !/^\d{4}$/.test(form.exam_year.trim())) preflight.push("Target year must be a 4-digit year");
+    if (!Array.isArray(form.subjects)) preflight.push("Subjects are missing");
+    if (preflight.length > 0) {
+      toast.error(preflight[0]);
+      return;
+    }
     setSaving(true);
     try {
-      // completeOnboarding upserts, RE-SELECTS the row and only returns once
-      // the database confirms onboarding_completed === true (with a retry).
+      // completeOnboarding sanitizes every field and retries with legacy types on 22P02,
+      // so the wizard cannot fail with "Invalid value type sent to database".
       const savedProfile = await db.completeOnboarding(user.id, user.email ?? "", form);
       if (!savedProfile?.onboarding_completed) {
         throw new Error("Your profile didn't save. Please try again.");
       }
       if (form.has_backlog && form.backlogs.length > 0) {
-        await db.addOnboardingBacklogs(user.id, form.backlogs, aliasExamId(examIdForOnboarding(derivedExam)));
+        try {
+          await db.addOnboardingBacklogs(user.id, form.backlogs, aliasExamId(examIdForOnboarding(derivedExam)));
+        } catch (blErr) {
+          // Backlog is secondary — profile already saved. Log and continue to dashboard
+          // rather than blocking registration with a scary DB error.
+          console.warn("[onboarding] backlog save failed (profile saved, continuing)", blErr);
+          toast.success("Profile set up! (Some backlog items need a retry in the Backlog page)");
+        }
       }
       await refreshProfile();
       toast.success("Profile set up!");
@@ -474,7 +497,7 @@ export default function Onboarding() {
               {step === 4 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><School className="w-4 h-4 text-accent-400" /> School / College</h2>
-                  <p className="text-xs text-slate-500">The AI Planner blocks school hours — set your school days and timings so your plan fits your free time.</p>
+                  <p className="text-xs text-slate-500">Select your school days — the AI Planner assumes 7 AM – 2 PM and never plans study during school.</p>
                   <label className="block">
                     <span className="input-label">School / College name</span>
                     <input className="input-base" value={form.school_name} onChange={(e) => update({ school_name: e.target.value })} placeholder="e.g. Delhi Public School" />
@@ -507,16 +530,6 @@ export default function Onboarding() {
                         );
                       })}
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block">
-                      <span className="input-label">School starts</span>
-                      <input type="time" className="input-base" value={form.school_start} onChange={(e) => update({ school_start: e.target.value })} />
-                    </label>
-                    <label className="block">
-                      <span className="input-label">School ends</span>
-                      <input type="time" className="input-base" value={form.school_end} onChange={(e) => update({ school_end: e.target.value })} />
-                    </label>
                   </div>
                 </>
               )}
@@ -583,8 +596,8 @@ export default function Onboarding() {
               {/* 9 — Class mode (skipped for self-study) */}
               {step === 8 && (
                 <>
-                  <h2 className="text-base font-semibold text-white flex items-center gap-2"><PlayCircle className="w-4 h-4 text-accent-400" /> How are your classes conducted? *</h2>
-                  <p className="text-xs text-slate-500">Live classes block your calendar; recorded classes are scheduled automatically.</p>
+                  <h2 className="text-base font-semibold text-white flex items-center gap-2"><PlayCircle className="w-4 h-4 text-accent-400" /> How do you prefer to take classes? *</h2>
+                  <p className="text-xs text-slate-500">Online live classes block your calendar; recorded classes are scheduled automatically in your preferred window.</p>
                   <div className="grid grid-cols-1 gap-2">
                     {CLASS_MODE_OPTIONS.map((o) => (
                       <button
@@ -641,20 +654,7 @@ export default function Onboarding() {
               {step === 9 && form.class_mode === "recorded" && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><CalendarClock className="w-4 h-4 text-accent-400" /> Lecture Details *</h2>
-                  <p className="text-xs text-slate-500">The AI Planner will auto-schedule your recorded lectures at your preferred study time.</p>
-                  <div>
-                    <span className="input-label">Average lecture duration *</span>
-                    <div className="grid grid-cols-3 gap-2 mt-1">
-                      {LECTURE_DURATION_OPTIONS.map((o) => (
-                        <button
-                          key={o.value} type="button" onClick={() => update({ lecture_duration: Number(o.value) })}
-                          className={`rounded-xl px-2 py-2.5 text-center text-sm transition-colors ${form.lecture_duration === Number(o.value) ? "bg-accent-600 text-white" : "bg-white/5 text-slate-300 hover:text-white"}`}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <p className="text-xs text-slate-500">The AI Planner assumes 2-hour lectures and auto-schedules them in your preferred window.</p>
                   <div>
                     <span className="input-label">Lectures per day *</span>
                     <div className="grid grid-cols-4 gap-2 mt-1">
@@ -684,86 +684,11 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 11 — Daily Study Time */}
+              {/* 11 — Routine & Focus */}
               {step === 10 && (
                 <>
-                  <h2 className="text-base font-semibold text-white flex items-center gap-2"><Clock className="w-4 h-4 text-accent-400" /> Daily Study Time *</h2>
-                  <p className="text-xs text-slate-500">How many hours can you realistically study on a normal weekday? Your plan sizes itself around this.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {STUDY_TIME_BUCKETS.map((b) => (
-                      <button
-                        key={b.value} type="button" onClick={() => update({ weekday_study_hours: b.value, daily_goal_hours: weekdayStudyHours(b.value, form.custom_weekday_hours) })}
-                        className={`rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${form.weekday_study_hours === b.value ? "bg-accent-600 text-white" : "bg-white/5 text-slate-300 hover:text-white"}`}
-                      >
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                  {form.weekday_study_hours === "custom" && (
-                    <label className="block">
-                      <span className="input-label">Custom hours per weekday</span>
-                      <input
-                        type="number" min={1} max={16} className="input-base"
-                        value={form.custom_weekday_hours}
-                        onChange={(e) => { const v = Number(e.target.value); update({ custom_weekday_hours: v, daily_goal_hours: weekdayStudyHours("custom", v) }); }}
-                      />
-                    </label>
-                  )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block">
-                      <span className="input-label">Saturday hours</span>
-                      <input
-                        type="number" min={0} max={16} className="input-base"
-                        value={form.saturday_study_hours || ""}
-                        onChange={(e) => update({ saturday_study_hours: Math.max(0, Math.min(16, Number(e.target.value))) })}
-                        placeholder="e.g. 8"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="input-label">Sunday hours</span>
-                      <input
-                        type="number" min={0} max={16} className="input-base"
-                        value={form.sunday_study_hours || ""}
-                        onChange={(e) => update({ sunday_study_hours: Math.max(0, Math.min(16, Number(e.target.value))) })}
-                        placeholder="e.g. 7"
-                      />
-                    </label>
-                  </div>
-                  <div>
-                    <span className="input-label">Which days do you study? *</span>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {STUDY_DAYS_OPTIONS.map((d) => {
-                        const active = form.study_days.includes(d.value);
-                        return (
-                          <button
-                            key={d.value} type="button" onClick={() => toggleDay("study_days", d.value)}
-                            className={`rounded-full px-3 py-1.5 text-xs transition-colors ${active ? "bg-accent-600 text-white" : "bg-white/5 text-slate-300 hover:text-white"}`}
-                          >
-                            {d.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-500">Weekends usually differ — the planner uses the Saturday/Sunday hours on those days.</p>
-                </>
-              )}
-
-              {/* 12 — Routine & Sleep */}
-              {step === 11 && (
-                <>
-                  <h2 className="text-base font-semibold text-white flex items-center gap-2"><AlarmClock className="w-4 h-4 text-accent-400" /> Routine &amp; Sleep *</h2>
-                  <p className="text-xs text-slate-500">Your usual routine — the planner works around it and protects your sleep.</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block">
-                      <span className="input-label">Wake-up time *</span>
-                      <input type="time" className="input-base" value={form.wake_up_time} onChange={(e) => update({ wake_up_time: e.target.value })} />
-                    </label>
-                    <label className="block">
-                      <span className="input-label">Sleep time *</span>
-                      <input type="time" className="input-base" value={form.sleep_time} onChange={(e) => update({ sleep_time: e.target.value })} />
-                    </label>
-                  </div>
+                  <h2 className="text-base font-semibold text-white flex items-center gap-2"><AlarmClock className="w-4 h-4 text-accent-400" /> Routine &amp; Focus *</h2>
+                  <p className="text-xs text-slate-500">Your study rhythm — the planner protects your sleep and builds breaks around deep focus.</p>
                   <div>
                     <span className="input-label">How much sleep do you need? *</span>
                     <div className="grid grid-cols-4 gap-2 mt-1">
@@ -822,8 +747,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 13 — Productive Time */}
-              {step === 12 && (
+              {/* 12 — Productive Time */}
+              {step === 11 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><Sunrise className="w-4 h-4 text-accent-400" /> Productive Time *</h2>
                   <p className="text-xs text-slate-500">When do you focus best? The planner schedules difficult tasks in your peak window.</p>
@@ -863,8 +788,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 14 — Subjects */}
-              {step === 13 && (
+              {/* 13 — Subjects */}
+              {step === 12 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><BookOpen className="w-4 h-4 text-accent-400" /> Subjects *</h2>
                   <p className="text-xs text-slate-500">{form.stream ? `Auto-loaded from ${STREAMS.find((s) => s.value === form.stream)?.label ?? "your stream"} — tap to adjust.` : "Select the subjects you're preparing for."}</p>
@@ -884,8 +809,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 15 — Backlog */}
-              {step === 14 && (
+              {/* 14 — Backlog */}
+              {step === 13 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><ListTodo className="w-4 h-4 text-accent-400" /> Backlog</h2>
                   <p className="text-xs text-slate-500">Do you currently have backlogs (pending lectures / DPPs / modules / PYQs)?</p>
@@ -991,8 +916,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 16 — Weekly Tests */}
-              {step === 15 && (
+              {/* 15 — Weekly Tests */}
+              {step === 14 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><Sparkles className="w-4 h-4 text-accent-400" /> Weekly Tests</h2>
                   <p className="text-xs text-slate-500">How many mock tests / weekly tests do you plan to attempt? The planner reserves a slot for each.</p>
@@ -1009,8 +934,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 17 — Goals */}
-              {step === 16 && (
+              {/* 16 — Goals */}
+              {step === 15 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><Flag className="w-4 h-4 text-accent-400" /> Primary Goal *</h2>
                   <div className="grid grid-cols-1 gap-2">
@@ -1032,8 +957,8 @@ export default function Onboarding() {
                 </>
               )}
 
-              {/* 18 — AI Preferences */}
-              {step === 17 && (
+              {/* 17 — AI Preferences */}
+              {step === 16 && (
                 <>
                   <h2 className="text-base font-semibold text-white flex items-center gap-2"><Languages className="w-4 h-4 text-accent-400" /> AI Preferences</h2>
                   <label className="block">
@@ -1057,7 +982,7 @@ export default function Onboarding() {
                   </div>
                   <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-xs text-slate-400 space-y-1">
                     <p className="text-slate-300 font-medium">Your AI Planner will now:</p>
-                    <p>• Block school hours ({form.school_days.length > 0 ? `${form.school_days.length} days, ${timeToDisplay(form.school_start)}–${timeToDisplay(form.school_end)}` : "no school days set"})</p>
+                    <p>• Block school hours ({form.school_days.length > 0 ? `${form.school_days.length} days, 7:00 AM–2:00 PM` : "no school days set"})</p>
                     <p>• Schedule hard tasks in your peak window ({SLOT_LABELS[form.productive_time] ?? "—"})</p>
                     <p>• Protect your sleep ({form.desired_sleep_hours || 8}h target)</p>
                     {form.tests_per_week > 0 && <p>• Reserve {form.tests_per_week >= 7 ? "daily" : `${form.tests_per_week} weekly`} test slot{form.tests_per_week === 1 ? "" : "s"}</p>}

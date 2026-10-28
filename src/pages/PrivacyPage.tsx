@@ -8,7 +8,7 @@ const SECTIONS = [
   },
   {
     title: "2. How we use your information",
-    body: "Your data is used to generate your daily study plan, track progress, provide the AI mentor, and improve StudyShield. We never sell your personal information to third parties.",
+    body: "Your data is used to generate your daily study plan, track progress, provide the Echo, and improve StudyShield. We never sell your personal information to third parties.",
   },
   {
     title: "3. Data storage & security",
@@ -36,7 +36,7 @@ const SECTIONS = [
   },
   {
     title: "9. Contact us",
-    body: "For privacy questions or requests, email support@studyshield.study. We'll respond within 7 days.",
+    body: "For privacy questions or requests, email studyshieldofficial@gmail.com. We'll respond within 7 days.",
   },
 ];
 

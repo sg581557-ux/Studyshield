@@ -8,15 +8,15 @@ const CHANNELS = [
     icon: <Mail className="w-5 h-5" />,
     title: "Email us",
     desc: "For support, billing or feedback — we reply within 24 hours.",
-    action: "support@studyshield.study",
-    href: "mailto:support@studyshield.study",
+    action: "studyshieldofficial@gmail.com",
+    href: "mailto:studyshieldofficial@gmail.com",
   },
   {
     icon: <MessageSquare className="w-5 h-5" />,
     title: "Feature requests",
     desc: "Want something new in StudyShield? Tell us what you'd love to see.",
     action: "Share an idea",
-    href: "mailto:ideas@studyshield.study",
+    href: "mailto:studyshieldofficial@gmail.com",
   },
 ];
 
@@ -25,7 +25,7 @@ export default function ContactPage() {
     <div className="public-site min-h-screen bg-[#050505] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
       <SEO
         title="Contact StudyShield – Support for JEE &amp; NEET Study Platform"
-        description="Questions about StudyShield for JEE &amp; NEET? Contact support@studyshield.study for help with AI study planner, backlog and focus features."
+        description="Questions about StudyShield for JEE &amp; NEET? Contact studyshieldofficial@gmail.com for help with AI study planner, backlog and focus features."
         canonical={CANONICAL.contact}
       />
       <PublicNavbar />

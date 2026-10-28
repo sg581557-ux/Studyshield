@@ -22,9 +22,14 @@ import { FullPageLoader } from "./States";
 
 export function PublicOnly({ children }: { children: ReactNode }) {
   const { user, profile, loading, profileLoading } = useAuth();
-  if (loading || profileLoading) return <FullPageLoader message="Loading your workspace…" />;
+  if (loading) return <FullPageLoader message="Loading your workspace…" />;
+  // Only block on profileLoading when we don't yet have a profile — background
+  // refreshes (profile already present) should not flash a full-page loader.
+  if (profileLoading && !profile) return <FullPageLoader message="Loading your workspace…" />;
   if (user) {
     if (profile && profile.onboarding_completed) return <Navigate to="/dashboard" replace />;
+    if (profile && !profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
+    if (!profile && profileLoading) return <FullPageLoader message="Loading your workspace…" />;
     return <Navigate to="/onboarding" replace />;
   }
   return <>{children}</>;
@@ -42,10 +47,14 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 // Onboarding guard for protected pages that need a completed profile
 // (e.g. the dashboard). Sends unfinished onboarding users to the wizard.
 // Must be nested inside <ProtectedRoute>.
+// Background refreshes (profile already loaded) do NOT show loader to avoid 3-4x flicker.
 export function RequireOnboarded({ children }: { children: ReactNode }) {
   const { profile, profileLoading } = useAuth();
-  if (profileLoading) return <FullPageLoader message="Loading your workspace…" />;
-  if (!profile || !profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
+  if (!profile) {
+    if (profileLoading) return <FullPageLoader message="Loading your workspace…" />;
+    return <Navigate to="/onboarding" replace />;
+  }
+  if (!profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
 }
 
@@ -54,7 +63,7 @@ export function RequireOnboarded({ children }: { children: ReactNode }) {
 // again. Must be nested inside <ProtectedRoute>.
 export function RequireNotOnboarded({ children }: { children: ReactNode }) {
   const { profile, profileLoading } = useAuth();
-  if (profileLoading) return <FullPageLoader message="Loading your workspace…" />;
+  if (!profile && profileLoading) return <FullPageLoader message="Loading your workspace…" />;
   if (profile && profile.onboarding_completed) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }

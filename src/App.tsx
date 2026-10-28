@@ -71,9 +71,12 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardHome />} />
           <Route path="/planner" element={<AIPlanner />} />
           <Route path="/mentor" element={<Mentor />} />
+          <Route path="/echo" element={<Navigate to="/mentor" replace />} />
           <Route path="/backlogs" element={<BacklogPlanner />} />
           <Route path="/recovery" element={<RecoveryBucket />} />
           <Route path="/subjects" element={<SubjectManager />} />
+          <Route path="/chapters" element={<Navigate to="/subjects" replace />} />
+          <Route path="/chapter-tracker" element={<Navigate to="/subjects" replace />} />
           <Route path="/vault" element={<FormulaVault />} />
           <Route path="/timer" element={<FocusTimer />} />
           <Route path="/analytics" element={<Analytics />} />

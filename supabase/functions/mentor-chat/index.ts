@@ -11,6 +11,12 @@ const SYSTEM_PROMPT = `You are StudyShield AI Mentor.
 
 You are NOT a generic AI assistant. You are the student's personal JEE/exam mentor — the senior coach who knows their exact numbers and talks to them like a student, not a chatbot.
 
+SAFETY & TONE (HIGHEST PRIORITY — NEVER VIOLATE)
+- You are a supportive, respectful, age-appropriate study coach for teenagers (13+). NEVER use profanity, slurs, abusive language, or words like "hell", "damn", "bastard", "stupid" toward the student.
+- Never insult, mock, threaten, or demean the student. Be strict but kind — like a good teacher, not a bully.
+- If the student uses abusive language, do NOT mirror it. Stay calm, respectful, and redirect to study help.
+- This rule overrides everything else. If you are about to output profanity, rewrite the sentence in clean, encouraging language.
+
 CORE IDENTITY
 - You mentor for competitive exams (JEE, NEET, UPSC, SSC, GATE, CAT, CA, CLAT, etc.). If the student's target exam is in the context, tailor everything to it.
 - You speak like a strict-but-supportive coach: direct, honest, practical. No generic motivational speeches, no "You got this!" fluff, no filler.
@@ -50,10 +56,15 @@ SCENARIO RULES
 - Energy / burnout days: recommend lighter consolidation (revision + practice), never skipping entirely.
 - General academic questions ("how do I revise Maths?"): give the general strategy briefly, then immediately adapt it to the student's actual preparation status.
 
-PLANNER INTEGRATION (you can adjust the student's study plan)
-- You can modify the student's study plan when the conversation gives a real reason: fatigue (capacity drop), missed days, extra free time, coaching/travel tomorrow, a test upcoming, a weak topic needing more practice, finished work, or a goal change.
-- When the user shares planning-relevant information, briefly say in your reply that you have adjusted (or will adjust) their plan, and keep your advice consistent with that change — e.g. "I've reduced today's workload to match your energy, moving the DPP to tomorrow."
-- Never invent changes or overpromise. Make sure your reply matches the change that is actually applied (the app shows a 'Planner updated' note with the concrete changes).
+PLANNER INTEGRATION (you can adjust the student's study plan) — AUTO-APPLY MODE A + EXAM INTAKE POPUP + LECTURE SWAP
+- You can modify the student's study plan when the conversation gives a real reason: fatigue (capacity drop), missed days, extra free time, coaching/travel tomorrow, a test upcoming, weak topic needing more practice, finished work, goal change, OR a direct request to change/swap/replace a lecture/chapter/task (e.g., "I want to do Sequence and Series instead of Kinematics", "replace Kinematics with Sequence and Series", "switch from Kinematics to Sequence and Series", "do X instead of Y"). Direct lecture/chapter swaps ARE legitimate plan-change reasons and must be honoured — never treat them as casual chat.
+- Treat “AI mentor …”, “mentor …”, “hey mentor”, Hinglish “AI mentor thak gaya”, “bhai coaching nahi hai” must be understood as direct intent. Intent matters, not keyword.
+- Voice input (isVoice=true) is often short/Hinglish — be extra lenient in understanding it. Short voice commands like “tired 3h” or “thak gaya, aaj 3 ghante” must map to regenerate_plan {study_hours:3, energy_level:low}.
+- EXAM POPUP FLOW: If user announces an exam with a weekday/date (e.g., “CS half yearly on Tuesday”, “half yearly exam of cs on tuesday”) and the conversation history does NOT yet contain your intake questions (you have not yet asked “How much have you studied?”), do NOT adjust the plan yet. Instead ask 2–3 short clarifying questions: 1) How much have you studied? 2) Which chapters feel weak? 3) Hours available on the day before? The app will show a popup with options for these — keep your text questions brief and match the popup. Wait for the user’s next answer, then on the following turn propose the plan change using their answers.
+- LECTURE/CHAPTER SWAP: When user says "do X instead of Y", "replace Y with X", "switch from Y to X" etc., acknowledge you understand and WILL update the plan — do NOT claim it is already done. Say like "Got it — I'll swap Y for X in today's plan." The authoritative change is applied by the planner tool; your reply must stay consistent with the tool's actual changes (the app shows a 'Planner updated' note with the concrete changes and an Undo button). Never say "Done, I've switched ..." unless the tool has been called.
+- When the user shares planning-relevant information (or answers your intake questions), briefly say in your reply that you have adjusted (or will adjust) their plan, and keep your advice consistent with that change — e.g. "I've regenerated Monday for your CS Half Yearly (6h, exam tomorrow) and added your weak Networks revision."
+- Never invent changes or overpromise. Make sure your reply matches the change that is actually applied (the app shows a 'Planner updated' note with the concrete changes and an Undo button).
+- If the change is applied, the app auto-shows “Planner updated — View in Planner”. Your reply should confirm in one sentence, not re-list tasks.
 
 WRITING RULES (VERY IMPORTANT)
 The app renders your replies with Markdown, but you must sound like an experienced teacher talking to a student — never like raw Markdown, a formula sheet, or AI-generated notes. The student should never see any mathematical command, LaTeX syntax, Markdown math, or programming-style math of any kind.
@@ -381,15 +392,29 @@ Input you receive:
 4. The mentor's reply.
 
 RULES:
-1. ONLY propose a change when the conversation contains a concrete, legitimate reason: user too tired/overwhelmed (capacity drop), missed days (backlog), extra free time, coaching or travel tomorrow, a test upcoming, weak topic needing more practice, finished work, or a goal change. Otherwise (casual chat, academic question, explanation request, unrelated topic, no clear signal) propose NOTHING — the plan is left untouched.
-2. If a change is needed, make the MINIMUM changes possible. Never redesign a whole week for one remark.
-3. RESPECT CAPACITY: a day's total minutes must stay within study_hours x 60 (from STUDENT CONTEXT today.input or profile daily_goal_hours), with at most 15% tolerance. If today's workload is too heavy for the available hours, use regenerate_plan with a lower study_hours instead of piling on more tasks.
-4. NEVER touch completed tasks. Never remove coaching or mandatory tasks. Keep lectures and hard deadlines intact — move lower-priority practice/revision tasks instead.
-5. Identify tasks by their EXACT title and date from PLAN TASKS. If the task the user mentions is not in PLAN TASKS, do not invent it.
-6. Prefer ONE regenerate_plan op when a day needs restructuring (capacity changed, energy changed, workload must be rebalanced). Use targeted ops (reschedule_task, add_task, remove_task, update_task_priority, update_availability) only for small tweaks.
-7. When the user states new available hours (e.g. "I can only study 4 hours today", "3 extra hours today"), pass them via study_hours in regenerate_plan or update_availability.
-8. If the intent is ambiguous, propose nothing — the mentor handles clarification in conversation.
-9. The reason must be short and in the user's own words.
+1. ONLY propose a change when the conversation contains a concrete, legitimate reason: user too tired/overwhelmed (capacity drop), missed days (backlog), extra free time, coaching or travel tomorrow, a test upcoming, weak topic needing more practice, finished work, goal change, OR a direct request to swap/replace a lecture/chapter/task — e.g. "I want to do Sequence and Series instead of Kinematics", "replace Kinematics with Sequence and Series", "switch from Kinematics to Sequence and Series", "do X instead of Y", "change Y to X". Direct lecture/chapter swap requests ARE always legitimate and must result in a plan change — never treat them as casual chat. Otherwise (casual chat, academic question, explanation request, unrelated topic, no clear signal) propose NOTHING — the plan is left untouched.
+2. WAKE PHRASE is optional. “AI mentor …”, “mentor …”, “hey mentor”, Hinglish “AI mentor thak gaya”, “bhai coaching nahi hai” must be understood as direct intent. Also understand natural phrasing without prefix: “I'm dead tired”, “only 3 hours today”, “thak gaya aaj 3 ghante hi padhunga”, “move physics DPP”, “exam tomorrow”, "Sequence and Series instead of Kinematics". Voice input (isVoice=true) is often very short — map “tired 3h”, “3 hours only”, “aaj 3 ghante” → regenerate_plan {study_hours:3, energy_level:low}.
+3. EXAM ON SPECIFIC DAY (critical) — TWO-STEP POPUP FLOW:
+   - If user says “half yearly exam”, “CS exam on Tuesday”, “exam on Friday”, “test tomorrow” and the **history does NOT yet contain your intake questions** (you have not yet asked “How much have you studied?”), do NOT propose a plan change yet. The app will show a popup with those questions — your reply should ask them briefly (Q1 coverage, Q2 weak chapters, Q3 hours) and wait for the next user turn.
+   - On the **next user turn** (user answers e.g., “half syllabus, Networks weak, 6h”), you MUST propose a plan change using their answers:
+     * Resolve the weekday to the NEXT occurrence using CURRENT DATE (e.g., today Sun 2026-09-06, “Tuesday” = 2026-09-08). Tuesday exam → D=2026-09-08, D-1=2026-09-07.
+     * Create at least: regenerate_plan for D-1 with exam_tomorrow:true and study_hours from the user’s answer (or daily_goal_hours), plus add_task for the weak chapter(s) on D-1: {op:add_task, title:"CS — Networks Revision", subject:"Computer Science", task_type:"revision", date:D-1, estimated_minutes:45, priority:"high"}.
+     * Example: User first says “AI mentor CS half yearly on tuesday” → you ask the 3 questions (no tool call). User then says “half syllabus, Networks is weak, 6h on Monday” → propose {op:"regenerate_plan", date:"2026-09-07", exam_tomorrow:true, study_hours:6, energy_level:high} + {op:"add_task", title:"CS — Networks Revision", ...} — keep it minimal (2-3 ops).
+   - Never skip exam intent. Even if PLAN TASKS is empty, still propose regenerate_plan for the relevant date on the **second** turn.
+4. If a change is needed, make the MINIMUM changes possible. Never redesign a whole week for one remark.
+5. RESPECT CAPACITY: a day's total minutes must stay within study_hours x 60 (from STUDENT CONTEXT today.input or profile daily_goal_hours), with at most 15% tolerance. If today's workload is too heavy for the available hours, use regenerate_plan with a lower study_hours instead of piling on more tasks.
+ 6. NEVER touch completed tasks. Never remove coaching or mandatory tasks. Keep lectures and hard deadlines intact — move lower-priority practice/revision tasks instead.
+ 7. Identify tasks by their EXACT title and date from PLAN TASKS. If the task the user mentions is not in PLAN TASKS, do not invent it. For exam case, you may invent ONLY the new add_task for the exam subject. For lecture/chapter SWAP case, you may invent ONLY the new add_task for the requested chapter (the old task must be looked up for remove_task, date is today or the date stated).
+ 8. Prefer ONE regenerate_plan op when a day needs restructuring (capacity changed, energy changed, workload must be rebalanced). Use targeted ops (reschedule_task, add_task, remove_task, update_task_priority, update_availability) only for small tweaks.
+ 9. When the user states new available hours (e.g. "I can only study 4 hours today", "3 extra hours today"), pass them via study_hours in regenerate_plan or update_availability.
+ 10. If the intent is ambiguous, propose nothing — the mentor handles clarification in conversation.
+ 11. The reason must be short and in the user's own words. Keep it Hinglish if user used Hinglish.
+ 12. LECTURE/CHAPTER SWAP (critical) — When user says "do X instead of Y", "replace Y with X", "switch from Y to X" etc.:
+     - Always propose a minimal swap: {op:"remove_task", task_title:"Y", date:TODAY} + {op:"add_task", title:"Lecture: <subject> — X", subject:"<inferred subject or null>", chapter:"X", task_type:"lecture", date:TODAY, estimated_minutes:60, priority:"high"}.
+     - Order matters: remove_task FIRST, then add_task (so capacity after removal is respected).
+     - Infer TODAY as the date from CURRENT DATE (the plan date in STUDENT CONTEXT today.date, e.g. 2026-09-25). If user says "tomorrow", use tomorrow.
+     - Subject inference: if user says "Mathematics Sequence and Series" or PLAN TASKS shows Y belonged to Physics and X looks like Mathematics, use the subject stated with X, else use Y's subject from PLAN TASKS, else null.
+     - Example: PLAN TASKS has "Lecture: Physics — Kinematics" on 2026-09-25. User: "I want to do Sequence and Series instead of Kinematics" → propose {op:"remove_task", task_title:"Kinematics", date:"2026-09-25"} + {op:"add_task", title:"Lecture: Mathematics — Sequence and Series", subject:"Mathematics", chapter:"Sequence and Series", task_type:"lecture", date:"2026-09-25", estimated_minutes:60, priority:"high"}. If subject not clear, still use chapter alone: {title:"Lecture: Sequence and Series", chapter:"Sequence and Series"}.
 
 If a change is justified, call the submit_plan_change tool exactly once with { reason, changes } (maximum 6 changes). If not justified, call nothing.`;
 
@@ -560,8 +585,9 @@ async function decidePlanChange(opts: {
   lastUserMsg: string;
   mentorReply: string;
   threadId: string | null;
+  isVoice?: boolean;
 }): Promise<{ id: string; reason: string; changes: Record<string, unknown>[] } | null> {
-  const { supabase, userId, endpoint, headers, model, contextBlock, lastUserMsg, mentorReply, threadId } = opts;
+  const { supabase, userId, endpoint, headers, model, contextBlock, lastUserMsg, mentorReply, threadId, isVoice } = opts;
 
   const today = new Date().toISOString().slice(0, 10);
   const horizon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
@@ -597,11 +623,13 @@ async function decidePlanChange(opts: {
         }))
       );
 
+  const voiceHint = isVoice ? "\nNOTE: This message was voice-transcribed (isVoice=true) — it may be short/Hinglish with typos. Be lenient: map ‘thak gaya 3 ghante’ → regenerate_plan {study_hours:3, energy_level:low}.\n" : "";
   const decisionMessages: ChatMessage[] = [
     {
       role: "system",
       content:
         PLANNER_DECISION_PROMPT +
+        voiceHint +
         "\n\n" +
         contextBlock +
         `\n\nPLAN TASKS (next 4 days, from the database)\n${planSummary}\n`,
@@ -616,14 +644,28 @@ async function decidePlanChange(opts: {
     tools: [PLANNER_TOOL],
     tool_choice: "auto",
     temperature: 0,
-    max_tokens: 600,
+    max_tokens: 400,
   };
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(decisionPayload),
-  });
+  const decisionController = new AbortController();
+  const decisionTimeout = setTimeout(() => decisionController.abort(), 2500);
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(decisionPayload),
+      signal: decisionController.signal,
+    });
+  } catch (e) {
+    clearTimeout(decisionTimeout);
+    if ((e as Error)?.name === "AbortError") {
+      console.warn("[mentor-chat] plan-decision timed out after 2.5s — returning without planner");
+      return null;
+    }
+    throw e;
+  }
+  clearTimeout(decisionTimeout);
   if (!res.ok) {
     console.error(`[mentor-chat] plan-decision call failed status=${res.status} body="${(await res.text()).slice(0, 300)}"`);
     return null;
@@ -753,13 +795,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
-    const { context, messages, language, images: rawImages, threadId, plannerEnabled } = body as {
+    const { context, messages, language, images: rawImages, threadId, plannerEnabled, isVoice } = body as {
       context: Record<string, unknown>;
       messages: ChatMessage[];
       language?: string;
       images?: Record<string, unknown>;
       threadId?: string | null;
       plannerEnabled?: boolean;
+      isVoice?: boolean;
     };
 
     if (!context || !Array.isArray(messages) || messages.length === 0) {
@@ -773,11 +816,13 @@ Deno.serve(async (req: Request) => {
 
     const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
     const openAiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openRouterKey && !openAiKey) {
-      console.error("[mentor-chat] no LLM API key configured (OPENROUTER_API_KEY / OPENAI_API_KEY missing)");
+    const groqKeyEarly = Deno.env.get("GROQ_API_KEY");
+    const geminiKeyEarly = Deno.env.get("GEMINI_API_KEY");
+    if (!openRouterKey && !openAiKey && !groqKeyEarly && !geminiKeyEarly) {
+      console.error("[mentor-chat] no LLM API key configured (OPENROUTER_API_KEY / GROQ_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY missing)");
       return json(503, {
         error: "not_configured",
-        message: "The AI Mentor service is missing its LLM API key. Set an OPENROUTER_API_KEY or OPENAI_API_KEY secret, then redeploy.",
+        message: "The AI Mentor service is missing its LLM API key. For FREE usage set one of: OPENROUTER_API_KEY (use free models google/gemini-2.0-flash-exp:free + deepseek/deepseek-r1:free), GROQ_API_KEY (free, fastest), or GEMINI_API_KEY (free, Google AI Studio). Then redeploy.",
       });
     }
 
@@ -930,22 +975,73 @@ Deno.serve(async (req: Request) => {
 
     const hasImages = Object.keys(images).length > 0;
     // Image solutions are longer (Detected Question → Similar Question),
-    // so give the vision path extra output headroom.
-    const maxTokens = hasImages ? 1600 : 1000;
+    // so give the vision path extra output headroom. Reduced for speed (was 1600/1000).
+    const maxTokens = hasImages ? 1200 : 800;
+
+    // --- FREE & BEST model routing ---
+    // Vision needs a multimodal model. Text can use a reasoning model.
+    // All defaults below are FREE on their providers.
+    // Rate-limit fix: primary models are now the smallest/fastest free models (least contention).
+    // Previous primaries google/gemma-4-31b and qwen3.8-27b are very popular and hit 429 quickly.
+    // New primaries: liquid 2.6B (text) + gemma-4-26b MoE 4B (vision) — much higher rate-limit headroom.
+    const FREE_VISION_MODEL = "google/gemma-4-26b-a4b-it:free"; // MoE 4B active — fast, less 429 than 31B
+    const FREE_TEXT_MODEL = "liquid/lfm-2.5-2.6b:free"; // 2.6B — fastest, highest free quota
+    const FREE_BACKUP_MODELS: string[] = [
+      "qwen/qwen3.8-27b:free", // strong reasoning fallback
+      "google/gemma-4-31b-it:free", // stable larger fallback
+      "nex-agi/nex-n2.5-mini:free", // vision fallback
+      "nvidia/nemotron-3.5-lightning:free",
+      "openrouter/free", // auto-router — picks any free model not rate-limited
+    ];
+    // Groq free models (OpenAI-compatible, ultra-fast, no vision)
+    const GROQ_TEXT_MODEL = Deno.env.get("GROQ_MODEL") || "llama-3.3-70b-versatile";
+    // Gemini direct free model (via Google AI Studio)
+    const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
+    const groqKey = Deno.env.get("GROQ_API_KEY");
+    const geminiKey = Deno.env.get("GEMINI_API_KEY");
 
     if (openRouterKey) {
+      // PRIMARY: OpenRouter — free models, supports both text + vision
       endpoint = "https://openrouter.ai/api/v1/chat/completions";
       headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${openRouterKey}`,
       };
+      const defaultModel = hasImages ? FREE_VISION_MODEL : FREE_TEXT_MODEL;
       payload = {
-        model: Deno.env.get("MENTOR_MODEL") || "openai/gpt-4o-mini",
+        model: Deno.env.get("MENTOR_MODEL") || defaultModel,
         messages: chatMessages,
         max_tokens: maxTokens,
         temperature: 0.4,
       };
-    } else {
+    } else if (groqKey && !hasImages) {
+      // FREE alternative: Groq — fastest free inference, text-only
+      endpoint = "https://api.groq.com/openai/v1/chat/completions";
+      headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${groqKey}`,
+      };
+      payload = {
+        model: Deno.env.get("GROQ_MODEL") || GROQ_TEXT_MODEL,
+        messages: chatMessages,
+        max_tokens: maxTokens,
+        temperature: 0.4,
+      };
+    } else if (geminiKey) {
+      // FREE alternative: Google Gemini direct (Google AI Studio) — free tier, vision + 1M context
+      // Uses OpenAI-compatible endpoint
+      endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+      headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${geminiKey}`,
+      };
+      payload = {
+        model: Deno.env.get("GEMINI_MODEL") || GEMINI_MODEL,
+        messages: chatMessages,
+        max_tokens: maxTokens,
+        temperature: 0.4,
+      };
+    } else if (openAiKey) {
       endpoint = "https://api.openai.com/v1/chat/completions";
       headers = {
         "Content-Type": "application/json",
@@ -957,20 +1053,108 @@ Deno.serve(async (req: Request) => {
         max_tokens: maxTokens,
         temperature: 0.4,
       };
+    } else {
+      // No key at all — shouldn't happen because we checked earlier, but guard
+      return json(503, {
+        error: "not_configured",
+        message: "No LLM API key configured. Set one of: OPENROUTER_API_KEY (free models: google/gemini-2.0-flash-exp:free + deepseek/deepseek-r1:free), GROQ_API_KEY (free), or GEMINI_API_KEY (free).",
+      });
     }
 
     const lastUser = toTextContent([...chatMessages].reverse().find((m) => m.role === "user") ?? { role: "user", content: "" });
+    const providerLabel = openRouterKey ? "openrouter-free" : groqKey && !hasImages ? "groq-free" : geminiKey ? "gemini-free" : "openai";
     console.log(
-      `[mentor-chat] user=${user.id} provider=${openRouterKey ? "openrouter" : "openai"} ` +
+      `[mentor-chat] user=${user.id} provider=${providerLabel} ` +
       `model=${String(payload.model)} messages=${chatMessages.length} images=${Object.keys(images).length} ` +
-      `contextChars=${contextBlock.length} lastUser="${lastUser.slice(0, 120)}"`
+      `contextChars=${contextBlock.length} lastUser="${lastUser.slice(0, 120)}" ` +
+      `envModel=${Deno.env.get("MENTOR_MODEL") ?? Deno.env.get("GROQ_MODEL") ?? Deno.env.get("GEMINI_MODEL") ?? Deno.env.get("MENTOR_OPENAI_MODEL") ?? "(default)"}`
     );
 
-    const llmRes = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
+    // Main LLM call with 14s timeout — prevents hanging forever on provider stall
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    let llmRes: Response;
+    try {
+      llmRes = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if ((e as Error)?.name === "AbortError") {
+        console.error("[mentor-chat] LLM fetch timed out after 20s");
+        return json(502, { error: "llm_error", message: "The AI is taking too long — please try again. Your plan, if requested, was already handled locally.", details: "timeout" });
+      }
+      throw e;
+    }
+    clearTimeout(timeoutId);
+
+    // Auto-fallback for OpenRouter free models on rate-limit / out-of-credits / model-not-found / server error:
+    // Try up to 3 fallbacks sequentially — each is a different free model, so a 429 on one
+    // often succeeds on the next (different rate-limit bucket). Also retry on 5xx/timeout which are often transient. Keep timeout 10s each.
+    if (!llmRes.ok && openRouterKey && (llmRes.status === 429 || llmRes.status === 402 || llmRes.status === 404 || llmRes.status >= 500)) {
+      const tried = new Set([String(payload.model)]);
+      const candidates: string[] = [];
+      // Always try the opposite primary as first swap (text<->vision) if not already tried
+      const firstSwap = hasImages
+        ? (Deno.env.get("MENTOR_MODEL") ? null : FREE_TEXT_MODEL)
+        : FREE_VISION_MODEL;
+      if (firstSwap && !tried.has(firstSwap)) candidates.push(firstSwap);
+      for (const m of FREE_BACKUP_MODELS) if (!tried.has(m) && !candidates.includes(m)) candidates.push(m);
+      for (const m of [FREE_TEXT_MODEL, FREE_VISION_MODEL]) if (!tried.has(m) && !candidates.includes(m)) candidates.push(m);
+      // Try up to 3 fallbacks (was 1) — still bounded to ~12s extra worst case, but avoids 429 errors
+      let fallbackSucceeded = false;
+      for (const fallbackModel of candidates.slice(0, 3)) {
+        if (tried.has(fallbackModel)) continue;
+        tried.add(fallbackModel);
+        // Small delay before retrying a 429 — respect Retry-After if present
+        if (llmRes.status === 429) {
+          const retryAfter = llmRes.headers.get("retry-after");
+          const waitMs = retryAfter ? Math.min(2000, Math.max(400, parseInt(retryAfter) * 1000 || 600)) : 600;
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+        console.warn(`[mentor-chat] primary free model ${String(payload.model)} hit ${llmRes.status}, retrying with fallback ${fallbackModel} (attempt ${tried.size - 1}/3)`);
+        const retryPayload = { ...payload, model: fallbackModel };
+        const retryController = new AbortController();
+        const retryTimeout = setTimeout(() => retryController.abort(), 10000);
+        let retryRes: Response;
+        try {
+          retryRes = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(retryPayload),
+            signal: retryController.signal,
+          });
+        } catch (e) {
+          clearTimeout(retryTimeout);
+          if ((e as Error)?.name === "AbortError") {
+            console.warn(`[mentor-chat] fallback ${fallbackModel} timed out`);
+            continue;
+          }
+          throw e;
+        }
+        clearTimeout(retryTimeout);
+        if (retryRes.ok) {
+          llmRes = retryRes;
+          payload = retryPayload;
+          fallbackSucceeded = true;
+          console.log(`[mentor-chat] fallback ${fallbackModel} succeeded after ${tried.size - 1} retries`);
+          break;
+        } else {
+          const retryBody = await retryRes.clone().text().catch(() => "");
+          console.warn(`[mentor-chat] fallback ${fallbackModel} also failed ${retryRes.status} body="${retryBody.slice(0, 200)}"`);
+          // If this fallback also 429, keep trying next; otherwise for 402/404 also keep trying
+          llmRes = retryRes;
+          payload = retryPayload;
+          // continue to next candidate instead of breaking
+        }
+      }
+      if (!fallbackSucceeded && llmRes.status === 429) {
+        console.warn(`[mentor-chat] all ${tried.size - 1} fallbacks exhausted, still 429 — will return rate_limited to client for retry`);
+      }
+    }
 
     if (!llmRes.ok) {
       const errText = await llmRes.text();
@@ -979,16 +1163,37 @@ Deno.serve(async (req: Request) => {
 
       // Map provider statuses to meaningful client errors
       if (llmRes.status === 429) {
+        const retryAfterHeader = llmRes.headers.get("retry-after");
+        const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader) || 8 : 8;
         return json(429, {
           error: "rate_limited",
-          message: "The AI provider is rate-limiting requests. Wait a moment and retry.",
+          message: `Echo is handling many requests right now — retrying automatically in ${retryAfterSec}s. If it persists, wait 30s and tap Retry.`,
           details: summary,
+          retryAfter: retryAfterSec,
         });
       }
       if (llmRes.status === 401 || llmRes.status === 403) {
         return json(502, {
           error: "llm_auth",
           message: "The AI provider rejected the API key (invalid, expired, or insufficient balance).",
+          details: summary,
+        });
+      }
+      if (llmRes.status === 402) {
+        return json(502, {
+          error: "llm_auth",
+          message: `The AI provider rejected the request — insufficient credits/balance (${summary}). Top up OpenRouter/OpenAI credits.`,
+          details: summary,
+        });
+      }
+      if (llmRes.status === 400) {
+        const lower = summary.toLowerCase();
+        const isContextLen = lower.includes("context") || lower.includes("too long") || lower.includes("max_tokens") || lower.includes("token");
+        return json(502, {
+          error: "llm_bad_request",
+          message: isContextLen
+            ? "Your conversation is too long — start a new chat or remove the image and try again."
+            : summary,
           details: summary,
         });
       }
@@ -999,57 +1204,90 @@ Deno.serve(async (req: Request) => {
           details: summary,
         });
       }
+      // Fallback for 500/502/503 and any other upstream error — surface the provider's
+      // summary instead of a generic string so the client can show the real cause.
       return json(502, {
         error: "llm_error",
-        message: "The AI provider returned an error. Please try again.",
+        message: summary || "The AI provider returned an error. Please try again.",
         details: summary,
       });
     }
 
-    const data = await llmRes.json();
-    const reply: string = data?.choices?.[0]?.message?.content?.trim() ?? "";
+    let data: Record<string, unknown> & { choices?: Array<{ message?: { content?: string } }> };
+    try {
+      data = await llmRes.json() as typeof data;
+    } catch (e) {
+      const raw = await llmRes.clone().text().catch(() => "");
+      console.error("[mentor-chat] JSON parse failed", e, `raw="${raw.slice(0, 400)}"`);
+      return json(502, { error: "llm_error", message: "The AI provider returned an invalid response. Please try again.", details: raw.slice(0, 300) });
+    }
+    let reply: string = (data?.choices?.[0]?.message?.content as string | undefined)?.trim() ?? "";
+
+    // Safety scrub: free models sometimes hallucinate profanity ("hell") — replace before sending to student
+    const originalReply = reply;
+    reply = reply
+      .replace(/\bhell\b/gi, "heck")
+      .replace(/\bhells\b/gi, "heck")
+      .replace(/\bdamn\b/gi, "darn")
+      .replace(/\bbastard\b/gi, "buddy")
+      .replace(/\bstupid\b/gi, "tough")
+      .replace(/\bidiot\b/gi, "friend");
+    if (reply !== originalReply) {
+      console.warn(`[mentor-chat] sanitized profanity for user=${user.id} originalLen=${originalReply.length} newLen=${reply.length}`);
+    }
 
     if (!reply) {
       console.error("[mentor-chat] empty reply from provider");
       return json(502, { error: "llm_error", message: "The AI provider returned an empty reply. Please try again." });
     }
 
-    console.log(`[mentor-chat] ok user=${user.id} replyChars=${reply.length}`);
+    console.log(`[mentor-chat] ok user=${user.id} replyChars=${reply.length} model=${String(payload.model)}`);
 
-    // Long-term memory: extract durable facts from this conversation and save them.
-    // Non-fatal — a failure here must never fail the reply the user already has.
-    try {
-      const saved = await extractAndSaveMemories(supabase, {
+    // Long-term memory: fire-and-forget — don't block reply (was ~600ms extra)
+    // Use EdgeRuntime.waitUntil when available (Deno Deploy / Supabase), else background promise.
+    const waitUntil = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.bind((globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime) ?? ((p: Promise<unknown>) => { p.catch(() => {}); });
+    waitUntil(
+      extractAndSaveMemories(supabase, {
         endpoint, headers, payload, user: user.id, memories,
         contextBlock, trimmed,
-      });
-      if (saved > 0) console.log(`[mentor-chat] saved ${saved} memory row(s) user=${user.id}`);
-    } catch (err) {
-      console.error("[mentor-chat] memory extraction failed", err);
-    }
+      }).then((saved) => {
+        if (saved > 0) console.log(`[mentor-chat] saved ${saved} memory row(s) user=${user.id}`);
+      }).catch((err) => console.error("[mentor-chat] memory extraction failed", err)),
+    );
 
     // AI Mentor → AI Planner: decide whether this conversation justifies a
-    // study-plan change. Non-fatal, and gated by the user's preference.
+    // study-plan change. Needed for response, but with fast timeout so it never blocks reply long.
     let planner: { id: string; reason: string; changes: Record<string, unknown>[] } | null = null;
     const plannerDisabled = plannerEnabled === false || plannerPref === "false";
-    if (!plannerDisabled && lastUser.trim().length >= 12 && !hasImages) {
+    const isVoiceMsg = !!isVoice;
+    const minLen = isVoiceMsg ? 4 : 12;
+    if (!plannerDisabled && lastUser.trim().length >= minLen && !hasImages) {
       try {
-        planner = await decidePlanChange({
+        // Use a fast small model for planner decision even if main reply used a larger one — cuts ~400ms
+        const plannerModel = "liquid/lfm-2.5-2.6b:free"; // fastest free with tools=true, valid 2026-05
+        const plannerPromise = decidePlanChange({
           supabase,
           userId: user.id,
           endpoint,
           headers,
-          model: String(payload.model),
+          model: plannerModel,
           contextBlock,
           lastUserMsg: lastUser,
           mentorReply: reply,
           threadId: typeof threadId === "string" && threadId ? threadId : null,
+          isVoice: isVoiceMsg,
         });
+        // 2.8s hard timeout — if planner hangs, return reply without planner rather than delay user (was 4s)
+        planner = await Promise.race([
+          plannerPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2800)),
+        ]) as typeof planner;
+        if (planner === null) console.warn("[mentor-chat] plan-decision timed out after 2.8s — returning reply without planner");
       } catch (err) {
         console.error("[mentor-chat] plan-decision call failed", err);
       }
     } else {
-      console.log(`[mentor-chat] plan-decision skipped user=${user.id} disabled=${plannerDisabled} shortMsg=${lastUser.trim().length < 12} images=${hasImages}`);
+      console.log(`[mentor-chat] plan-decision skipped user=${user.id} disabled=${plannerDisabled} shortMsg=${lastUser.trim().length < minLen} isVoice=${isVoiceMsg} images=${hasImages}`);
     }
 
     return json(200, {

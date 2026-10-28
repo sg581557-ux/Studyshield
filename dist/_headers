@@ -7,10 +7,20 @@
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=3600, s-maxage=3600
 
+# SPA shell — never cache HTML at edge; hashed assets are immutable.
+# Without this, Cloudflare may serve stale index.html that references
+# deleted /assets/* hashes -> JS/CSS 404 -> empty #root (white screen)
+# for new users (cold cache) while workers.dev (fresh) works.
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: SAMEORIGIN
   Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=()
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

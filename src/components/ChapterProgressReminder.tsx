@@ -35,9 +35,11 @@ export default function ChapterProgressReminder() {
 
   const examFamily = useMemo(() => backlogExamFamily(profile?.target_exam ?? ""), [profile?.target_exam]);
 
+  const profileId = profile?.id;
+  const targetExam = profile?.target_exam ?? "";
   const loadRows = useCallback(async (): Promise<SubjectRow[]> => {
     if (!profile) return [];
-    const subjects = await db.getSubjects(profile.target_exam ?? "").catch(() => [] as SyllabusSubject[]);
+    const subjects = await db.getSubjects(targetExam).catch(() => [] as SyllabusSubject[]);
     const all = await Promise.all(subjects.map((s) => db.getChapters(s.id).catch(() => [] as SyllabusChapter[])));
     const ucs = (await db.getUserChapters().catch(() => [] as UserChapter[])).filter(
       (u) => backlogExamFamily(u.exam) === examFamily,
@@ -63,7 +65,7 @@ export default function ChapterProgressReminder() {
       }
       return { subject: s, chapters: ordered, current, next };
     }).filter((r) => r.chapters.length > 0);
-  }, [profile, examFamily]);
+  }, [profileId, targetExam, examFamily]);
 
   // Evaluate eligibility: cadence passed → show; fast-track (chapter ≥80% done
   // today) → show; re-check once a minute while hidden.

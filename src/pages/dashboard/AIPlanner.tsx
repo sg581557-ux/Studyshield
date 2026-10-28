@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles, RefreshCw, Clock, Zap, CheckCircle2, Loader2,
   Trash2, Calendar, AlertTriangle, Brain, Flame, Shield, Coffee,
   SkipForward, RotateCcw, Lightbulb, BookOpen, Sigma, FileQuestion,
-  ClipboardList, PlayCircle, ChevronDown, TrendingUp,
+  ClipboardList, PlayCircle, ChevronDown, TrendingUp, History,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
@@ -21,6 +22,7 @@ import { selectedHoursFor } from "../../services/habitStats";
 import { Card, CardBody, SectionTitle, Button, EmptyState, ProgressBar } from "../../components/ui";
 import { ENERGY_LEVELS, minutesToHM, todayISODate, TASK_TYPE_LABELS } from "../../lib/constants";
 import type { PlanTask, EnergyLevel, TaskStatus, Priority } from "../../lib/types";
+import { CrazyInlineLoader, CrazyListSkeleton } from "../../components/loaders/AestheticLoader";
 
 function describeError(err: unknown): string {
   if (!err) return "Unknown error (no error object).";
@@ -56,8 +58,13 @@ const PRIORITY_LABELS: Record<Priority, string> = {
 type CoachingDiagnostics = CoachingPlannerResult["diagnostics"];
 
 export default function AIPlanner() {
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  const initialDate = (() => {
+    const d = searchParams.get("date");
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayISODate();
+  })();
   const [tasks, setTasks] = useState<PlanTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -65,7 +72,7 @@ export default function AIPlanner() {
   const [energy, setEnergy] = useState<EnergyLevel>("normal");
   const [schoolDay, setSchoolDay] = useState(false);
   const [examTomorrow, setExamTomorrow] = useState(false);
-  const [date, setDate] = useState<string>(todayISODate());
+  const [date, setDate] = useState<string>(initialDate);
   const [notes, setNotes] = useState("");
   const [completedToday, setCompletedToday] = useState("");
   const [unexpectedEvents, setUnexpectedEvents] = useState("");
@@ -73,16 +80,55 @@ export default function AIPlanner() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [recoveryPending, setRecoveryPending] = useState(0);
   const [showCompleted, setShowCompleted] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyGroups, setHistoryGroups] = useState<{ date: string; tasks: PlanTask[] }[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Refetch whenever the selected date changes. The fetch is inlined in the
-  // effect (React's documented fetch-on-mount shape); the loading flip happens
-  // during render when the date changes so the spinner shows immediately.
-  const [prevLoadDate, setPrevLoadDate] = useState(date);
-  if (prevLoadDate !== date) {
-    setPrevLoadDate(date);
-    setLoading(true);
-  }
+  // Sync date from ?date= query (e.g., Mentor "View in AI Planner" → /planner?date=2026-09-07)
+  useEffect(() => {
+    const d = searchParams.get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== date) setDate(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
+  // History loader
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const all = await db.getAllTasks();
+      const map = new Map<string, PlanTask[]>();
+      for (const t of all) {
+        const d = t.scheduled_date ?? "unscheduled";
+        if (!map.has(d)) map.set(d, []);
+        map.get(d)!.push(t);
+      }
+      const groups = Array.from(map.entries())
+        .filter(([d]) => d !== "unscheduled")
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .slice(0, 30)
+        .map(([date, tasks]) => ({ date, tasks }));
+      setHistoryGroups(groups);
+    } catch (err) {
+      console.error("[AIPlanner] history load threw", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showHistory) void loadHistory();
+  }, [showHistory, loadHistory]);
+
+  // Track date changes without render-phase setState (which causes double commits in StrictMode).
+  const prevLoadDateRef = useRef(date);
+  useEffect(() => {
+    if (prevLoadDateRef.current !== date) {
+      prevLoadDateRef.current = date;
+      setLoading(true);
+    }
+  }, [date]);
+
+  const profileIdForHours = profile?.id;
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -104,7 +150,7 @@ export default function AIPlanner() {
       } finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [date, profile]);
+  }, [date, profileIdForHours]);
 
   // Shared refetch for event handlers (delete-task recovery). Handler calls
   // may flip `loading` synchronously — only effect bodies cannot.
@@ -125,7 +171,7 @@ export default function AIPlanner() {
       console.error("[AIPlanner] load threw", err);
       setTasks([]);
     } finally { setLoading(false); }
-  }, [date, profile]);
+  }, [date, profileIdForHours]);
 
   const activeTasks = useMemo(() => tasks.filter((t) => {
     const s = t.task_status ?? (t.completed ? "completed" : "pending");
@@ -181,6 +227,17 @@ export default function AIPlanner() {
       try {
         await db.saveDailyPlanInputs({ plan_date: date, was_school_day: schoolDay, study_hours: hours, energy_level: energy, exam_tomorrow: examTomorrow });
       } catch (err) { console.error("[AIPlanner] saveDailyPlanInputs threw", err); }
+      // Streak: generating today's plan counts as activity, max 1 per day, and starts streak at 1 if none
+      try {
+        const bump = await db.bumpStreakForPlanGeneration(date);
+        if (!bump.alreadyBumped && bump.newStreak > 0) {
+          toast.success(`🔥 ${bump.newStreak}-day streak! Keep it going.`);
+          // Refresh profile so Layout/Dashboard streak UI shows 1 immediately, not stale 0
+          void refreshProfile().catch(() => {});
+          // Also notify Layout to recompute streak without waiting 850ms effect
+          try { window.dispatchEvent(new CustomEvent("studyshield:streak-updated", { detail: bump.newStreak })); } catch {}
+        }
+      } catch (err) { console.error("[AIPlanner] bumpStreak threw", err); }
 
       setTasks(result.tasks);
       setDiagnostics(result.diagnostics);
@@ -284,6 +341,12 @@ export default function AIPlanner() {
         <h1 className="text-xl font-semibold text-white flex items-center gap-2"><Sparkles className="w-5 h-5 text-accent-400" /> AI Planner</h1>
         <p className="text-sm text-slate-500 mt-0.5">Intelligent scheduling that adapts to your coaching style (online/offline), workload, and progress.</p>
       </div>
+      {searchParams.get("from") === "mentor" && (
+        <div className="flex items-center gap-2 rounded-xl border border-accent-500/25 bg-accent-600/10 px-4 py-3 text-sm text-accent-200">
+          <Brain className="h-4 w-4 shrink-0 text-accent-400" />
+          <span>Mentor updated this day — showing <strong className="text-white">{date}</strong> (regenerated for your exam). Check tasks below.</span>
+        </div>
+      )}
 
       {/* Daily Input Form */}
       <Card><CardBody className="space-y-4">
@@ -318,6 +381,7 @@ export default function AIPlanner() {
           <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-400"><input type="checkbox" checked={examTomorrow} onChange={(e) => setExamTomorrow(e.target.checked)} className="accent-accent-600" /> Exam tomorrow</label>
           {recoveryPending > 0 && <span className="text-xs text-warning-400 flex items-center gap-1"><RotateCcw className="w-3 h-3" /> {recoveryPending} in recovery</span>}
           <div className="flex-1" />
+          <Button variant="ghost" size="sm" onClick={() => setShowHistory((v) => !v)}><History className="w-4 h-4" /> {showHistory ? "Hide history" : "History"}</Button>
           <Button variant="ghost" size="sm" onClick={clearDay}><Trash2 className="w-4 h-4" /> Clear day</Button>
           <Button onClick={generate} loading={generating} disabled={!profile}><RefreshCw className="w-4 h-4" /> Generate plan</Button>
         </div>
@@ -387,13 +451,65 @@ export default function AIPlanner() {
         </>
       )}
 
+      {/* History — last 30 generated plans */}
+      {showHistory && (
+        <Card>
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-accent-400" /> Generated history
+              </h3>
+              <span className="text-xs text-slate-500">{historyGroups.length} days</span>
+            </div>
+            {historyLoading ? (
+              <CrazyInlineLoader message="Loading your plan history…" />
+            ) : historyGroups.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-sm text-slate-400">No generated plans yet.</p>
+                <p className="text-xs text-slate-500 mt-1">Generate a plan to start building your history.</p>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2 max-h-[420px] overflow-y-auto pr-1 -mr-1">
+                {historyGroups.map(({ date: d, tasks: ts }) => {
+                  const done = ts.filter((t) => t.completed || t.task_status === "completed").length;
+                  const total = ts.length;
+                  const mins = ts.reduce((a, t) => a + t.estimated_minutes, 0);
+                  const isActive = d === date;
+                  return (
+                    <div key={d} className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-3 ${isActive ? "border-accent-500/40 bg-accent-600/10" : "border-white/10 bg-white/5 hover:bg-white/[0.06]"}`}>
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-sm font-medium truncate ${isActive ? "text-accent-300" : "text-white"}`}>{d}</p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {total} tasks • {minutesToHM(mins)} • {done}/{total} done • {total ? Math.round((done / total) * 100) : 0}%
+                        </p>
+                        <p className="text-[11px] text-slate-600 truncate mt-0.5">{ts.slice(0, 2).map((t) => t.title).join(" • ") || "—"}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setDate(d);
+                          setShowHistory(false);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${isActive ? "bg-accent-600 text-white" : "bg-white text-zinc-900 hover:bg-zinc-100"}`}
+                      >
+                        {isActive ? "Viewing" : "View"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       {/* Active Tasks */}
       <Card><CardBody>
         <div className="flex items-center justify-between">
           <SectionTitle>Tasks for {date}</SectionTitle>
           {tasks.length > 0 && <span className="text-xs text-slate-500">{completedCount}/{tasks.length} done · {minutesToHM(remainingMinutes)} left</span>}
         </div>
-        {loading ? <div className="py-8 flex items-center justify-center"><Loader2 className="w-5 h-5 text-accent-500 animate-spin" /></div> :
+        {loading ? <CrazyListSkeleton count={4} /> :
          activeTasks.length === 0 && completedTasks.length === 0 ? <EmptyState icon={<Sparkles className="w-8 h-8" />} title="No tasks yet" description="Set your hours and generate a plan." /> : (
           <div className="space-y-1.5 mt-2">
             <AnimatePresence>

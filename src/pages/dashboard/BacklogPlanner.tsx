@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ListChecks, Plus, Loader2, Sparkles, X, Layers, Zap, GraduationCap } from "lucide-react";
+import { ListChecks, Plus, Sparkles, X, Layers, Zap, GraduationCap } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { db, buildSmartTitle } from "../../services/db";
@@ -10,6 +10,7 @@ import { Card, CardBody, Button, EmptyState } from "../../components/ui";
 import { BacklogCard } from "../../components/backlog/BacklogCard";
 import { AddBacklogSheet } from "../../components/backlog/AddBacklogSheet";
 import type { BacklogItem, BacklogKind, SmartBacklogInput } from "../../lib/types";
+import { CrazyGridSkeleton } from "../../components/loaders/AestheticLoader";
 import {
   backlogExamFamily, EXAM_LABEL, examIdForBacklog, extractBacklogResources, loadRecent, pushRecent, resourceMeta,
   resourceSummary, subjectColor, remainingOf, type RecentBacklog,
@@ -104,9 +105,10 @@ export default function BacklogPlanner() {
     return () => { cancelled = true; };
   }, [activeExam]);
 
-  // Deep-link support (?add=1&kind=…&bulk=1)
+  // Deep-link support (?add=1&kind=…&bulk=1) — depend on string value to avoid object-identity churn
+  const addParam = searchParams.get("add");
   useEffect(() => {
-    if (searchParams.get("add")) {
+    if (addParam) {
       const kind = (searchParams.get("kind") as BacklogKind | null) ?? undefined;
       const bulk = searchParams.get("bulk") === "1";
       setPreset(bulk ? { bulk: true } : kind ? { kind } : {});
@@ -114,7 +116,7 @@ export default function BacklogPlanner() {
       setSheetOpen(true);
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [addParam, setSearchParams]);
 
   const suggestions = useMemo(
     () => deriveSuggestions(items).filter((s) => !dismissedSuggestions.has(s.id)),
@@ -364,7 +366,7 @@ export default function BacklogPlanner() {
       <Card>
         <CardBody>
           {loading ? (
-            <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 text-accent-500 animate-spin" /></div>
+            <CrazyGridSkeleton count={6} />
           ) : visible.length === 0 ? (
             <EmptyState
               icon={<ListChecks className="w-8 h-8" />}

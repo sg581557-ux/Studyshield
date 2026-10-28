@@ -1,5 +1,5 @@
 // ============================================================
-// Image handling for the AI Mentor "Solve from Image" feature.
+// Image handling for the Echo "Solve from Image" feature.
 //
 // Security: uploaded images are NEVER persisted to the database
 // or any server. They live only in the in-memory session store
@@ -9,7 +9,16 @@
 // "Uploaded Image" chip without the bytes.
 // ============================================================
 
-export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif"];
+export const EXTENSION_FALLBACK_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  avif: "image/avif",
+};
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 const SESSION_LIMIT = 40; // max images kept in memory per tab session
 
@@ -95,10 +104,29 @@ export function clearSessionImages(): void {
 // Validation + compression
 // ------------------------------------------------------------------
 
+function inferTypeFromName(name: string): string | null {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return EXTENSION_FALLBACK_TYPES[ext] ?? null;
+}
+
 /** Returns an error message, or null when the file is acceptable. */
 export function validateImageFile(file: File): string | null {
-  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-    return "Unsupported format. Please upload a JPG, PNG or WEBP image.";
+  if (file.size === 0) return "That file is empty. Please pick another image.";
+  let type = file.type;
+  // iOS camera fallback can yield "" or heic/heif — infer from extension
+  if (!type || !ALLOWED_IMAGE_TYPES.includes(type)) {
+    const inferred = file.name ? inferTypeFromName(file.name) : null;
+    if (inferred && ALLOWED_IMAGE_TYPES.includes(inferred)) type = inferred;
+    else if (!ALLOWED_IMAGE_TYPES.includes(type)) {
+      // Still allow heic/heif for conversion; otherwise reject
+      if (type === "" && inferred) {
+        // allow via inferred
+      } else if (!type && inferred) {
+        // allow
+      } else {
+        return "Unsupported format. Please upload a JPG, PNG, WEBP, HEIC or AVIF image.";
+      }
+    }
   }
   if (file.size > MAX_IMAGE_BYTES) {
     return "Image is larger than 10 MB. Please compress it and try again.";
